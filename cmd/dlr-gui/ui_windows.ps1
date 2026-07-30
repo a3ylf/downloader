@@ -370,7 +370,7 @@ if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot) -and (Test-Path -LiteralPat
 else {
     $iconBytes = [Convert]::FromBase64String('__DLR_EMBEDDED_ICON__')
 }
-$iconStream = [IO.MemoryStream]::new(,$iconBytes)
+$iconStream = [IO.MemoryStream]::new($iconBytes)
 try {
     $iconBitmap = [Windows.Media.Imaging.BitmapImage]::new()
     $iconBitmap.BeginInit()
