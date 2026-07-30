@@ -15,20 +15,23 @@ func TestEmbeddedUIContainsCoreControls(t *testing.T) {
 		`Name="OpenFolderButton"`,
 		`Name="ActivityCard"`,
 	} {
-		if !strings.Contains(uiScript, control) {
+		if !strings.Contains(uiXAML, control) {
 			t.Errorf("embedded UI does not contain %s", control)
 		}
 	}
 }
 
-func TestEmbeddedUIUsesGlassVisuals(t *testing.T) {
+func TestEmbeddedUIUsesSpectrumWaveVisuals(t *testing.T) {
 	for _, visual := range []string{
 		"LinearGradientBrush",
 		"BlurEffect",
 		"DropShadowEffect",
-		`CornerRadius="15"`,
+		`CornerRadius="18"`,
+		`x:Key="WaveStroke"`,
+		`Style="{StaticResource ActiveNavButton}"`,
+		`Name="VersionText"`,
 	} {
-		if !strings.Contains(uiScript, visual) {
+		if !strings.Contains(uiXAML, visual) {
 			t.Errorf("embedded UI does not contain %s", visual)
 		}
 	}

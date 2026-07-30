@@ -325,6 +325,15 @@ $xaml = @'
 </Window>
 '@
 
+$spectrumXamlPath = Join-Path $PSScriptRoot 'ui_spectrum.xaml'
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot) -and (Test-Path -LiteralPath $spectrumXamlPath -PathType Leaf)) {
+    $xaml = Get-Content -LiteralPath $spectrumXamlPath -Raw
+}
+else {
+    $embeddedXamlBase64 = '__DLR_EMBEDDED_XAML__'
+    $xaml = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($embeddedXamlBase64))
+}
+
 $window = [Windows.Markup.XamlReader]::Parse($xaml)
 
 function Find-Control([string] $name) {
@@ -333,6 +342,7 @@ function Find-Control([string] $name) {
 
 $titleBar = Find-Control 'TitleBar'
 $titleText = Find-Control 'TitleText'
+$versionText = Find-Control 'VersionText'
 $minimizeButton = Find-Control 'MinimizeButton'
 $maximizeButton = Find-Control 'MaximizeButton'
 $closeButton = Find-Control 'CloseButton'
@@ -360,7 +370,8 @@ if ([string]::IsNullOrWhiteSpace($appVersion)) {
     $appVersion = 'dev'
 }
 
-$titleText.Text = "DLR  DOWNLOADER  $appVersion"
+$titleText.Text = 'DLR'
+$versionText.Text = $appVersion
 $outputInput.Text = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
 
 function Install-StartMenuShortcut {

@@ -116,15 +116,9 @@ jobs:
           }
 
           Add-Type -AssemblyName PresentationFramework
-          $source = Get-Content $scriptPath -Raw
-          $match = [regex]::Match(
-            $source,
-            "(?s)\`$xaml = @'\r?\n(.*?)\r?\n'@"
-          )
-          if (-not $match.Success) {
-            throw "Embedded XAML block was not found."
-          }
-          $window = [Windows.Markup.XamlReader]::Parse($match.Groups[1].Value)
+          $xamlPath = Resolve-Path "cmd/dlr-gui/ui_spectrum.xaml"
+          $xaml = Get-Content $xamlPath -Raw
+          $window = [Windows.Markup.XamlReader]::Parse($xaml)
           if ($null -eq $window.FindName("DownloadButton")) {
             throw "DownloadButton was not created."
           }
