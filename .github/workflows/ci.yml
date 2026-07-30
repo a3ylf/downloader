@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          gofmt -l . | tee /tmp/gofmt-output
+          test ! -s /tmp/gofmt-output
+
+      - name: Run tests
+        run: go test -race -cover ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            goos: linux
+            goarch: amd64
+          - name: Linux ARM64
+            goos: linux
+            goarch: arm64
+          - name: macOS Intel
+            goos: darwin
+            goarch: amd64
+          - name: macOS Apple Silicon
+            goos: darwin
+            goarch: arm64
+          - name: Windows x64
+            goos: windows
+            goarch: amd64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build CLI
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath ./cmd/dlr
+
+      - name: Build Windows desktop app
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-H windowsgui" ./cmd/dlr-gui

@@ -6,10 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-const version = "0.1.0"
+var version = "0.2.0-dev"
 
 const outputTemplate = "%(title).200B [%(id)s].%(ext)s"
 
@@ -17,6 +18,7 @@ type options struct {
 	mp3       bool
 	outputDir string
 	cookies   string
+	quality   int
 	version   bool
 	ffmpegDir string
 	jsRuntime string
@@ -90,6 +92,7 @@ func parseArgs(args []string) (options, error) {
 	fs.StringVar(&opts.outputDir, "out", opts.outputDir, "output directory")
 	fs.StringVar(&opts.outputDir, "o", opts.outputDir, "output directory")
 	fs.StringVar(&opts.cookies, "cookies", "", "cookies file for sites that require login")
+	fs.IntVar(&opts.quality, "quality", 0, "maximum video height (480, 720, 1080, 1440, or 2160)")
 	fs.BoolVar(&opts.version, "version", false, "print version")
 	fs.Usage = usage(fs)
 
@@ -101,6 +104,10 @@ func parseArgs(args []string) (options, error) {
 	if !opts.version && len(opts.urls) == 0 {
 		fs.Usage()
 		return opts, fmt.Errorf("missing URL")
+	}
+	if opts.quality != 0 && opts.quality != 480 && opts.quality != 720 &&
+		opts.quality != 1080 && opts.quality != 1440 && opts.quality != 2160 {
+		return opts, fmt.Errorf("quality must be one of 480, 720, 1080, 1440, or 2160")
 	}
 
 	return opts, nil
@@ -129,6 +136,7 @@ func normalizeArgs(args []string) []string {
 		"--out":     true,
 		"-o":        true,
 		"--cookies": true,
+		"--quality": true,
 	}
 
 	var flags []string
@@ -188,7 +196,7 @@ func buildYTDLPArgs(opts options) []string {
 		)
 	} else {
 		args = append(args,
-			"--format", "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[vcodec^=avc1][acodec^=mp4a]/bv*+ba/b",
+			"--format", videoFormat(opts.quality),
 			"--merge-output-format", "mp4",
 			"--recode-video", "mp4",
 			"--postprocessor-args", "VideoConvertor+ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
@@ -197,6 +205,17 @@ func buildYTDLPArgs(opts options) []string {
 
 	args = append(args, opts.urls...)
 	return args
+}
+
+func videoFormat(maxHeight int) string {
+	height := ""
+	if maxHeight > 0 {
+		height = fmt.Sprintf("[height<=%d]", maxHeight)
+	}
+
+	return "bv*" + height + "[vcodec^=avc1]+ba[acodec^=mp4a]/" +
+		"b" + height + "[vcodec^=avc1][acodec^=mp4a]/" +
+		"bv*" + height + "+ba/b" + height
 }
 
 func findTool(name string) (string, error) {
@@ -216,18 +235,26 @@ func findTool(name string) (string, error) {
 
 func localToolCandidates(name string) []string {
 	candidates := []string{}
+	names := []string{name}
+	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+		names = append(names, name+".exe")
+	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(cwd, ".tools", "bin", name))
+		for _, candidateName := range names {
+			candidates = append(candidates, filepath.Join(cwd, ".tools", "bin", candidateName))
+		}
 	}
 
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, name),
-			filepath.Join(dir, ".tools", "bin", name),
-			filepath.Join(filepath.Dir(dir), ".tools", "bin", name),
-		)
+		for _, candidateName := range names {
+			candidates = append(candidates,
+				filepath.Join(dir, candidateName),
+				filepath.Join(dir, ".tools", "bin", candidateName),
+				filepath.Join(filepath.Dir(dir), ".tools", "bin", candidateName),
+			)
+		}
 	}
 
 	return candidates
@@ -248,13 +275,20 @@ func isExecutable(path string) bool {
 	if err != nil || info.IsDir() {
 		return false
 	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
 	return info.Mode()&0o111 != 0
 }
 
 func missingToolError(name string) error {
 	var install string
 	if name == "yt-dlp" || name == "ffmpeg" {
-		install = " Run ./scripts/install-tools.sh from this repo to install local copies."
+		if runtime.GOOS == "windows" {
+			install = " Download the Windows portable bundle from GitHub Releases, or place the tool beside dlr.exe."
+		} else {
+			install = " Run ./scripts/install-tools.sh from this repo to install local copies."
+		}
 	}
 	return fmt.Errorf("%s not found.%s", name, install)
 }

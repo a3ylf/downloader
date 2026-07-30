@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  package:
+    name: Package ${{ matrix.name }}
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+            extension: ""
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+            extension: ""
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            extension: ""
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            extension: ""
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+            extension: ".exe"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build CLI
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE="dlr-${{ matrix.name }}"
+          mkdir -p "dist/$PACKAGE"
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "dist/$PACKAGE/dlr${{ matrix.extension }}" ./cmd/dlr
+          cp README.md "dist/$PACKAGE/"
+
+      - name: Build Windows desktop app
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE="dlr-${{ matrix.name }}"
+          go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=$VERSION" -o "dist/$PACKAGE/dlr-gui.exe" ./cmd/dlr-gui
+
+      - name: Add portable Windows tools
+        if: matrix.goos == 'windows'
+        run: |
+          PACKAGE="dlr-${{ matrix.name }}"
+          TOOLS_TMP="$(mktemp -d)"
+
+          curl --fail --location --retry 3 \
+            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe \
+            --output "dist/$PACKAGE/yt-dlp.exe"
+
+          curl --fail --location --retry 3 \
+            https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip \
+            --output "$TOOLS_TMP/ffmpeg.zip"
+          unzip -q "$TOOLS_TMP/ffmpeg.zip" -d "$TOOLS_TMP/ffmpeg"
+          find "$TOOLS_TMP/ffmpeg" -type f -name ffmpeg.exe -exec cp {} "dist/$PACKAGE/ffmpeg.exe" \;
+          find "$TOOLS_TMP/ffmpeg" -type f -name ffprobe.exe -exec cp {} "dist/$PACKAGE/ffprobe.exe" \;
+
+          curl --fail --location --retry 3 \
+            https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip \
+            --output "$TOOLS_TMP/deno.zip"
+          unzip -q "$TOOLS_TMP/deno.zip" -d "$TOOLS_TMP/deno"
+          cp "$TOOLS_TMP/deno/deno.exe" "dist/$PACKAGE/deno.exe"
+
+          test -f "dist/$PACKAGE/yt-dlp.exe"
+          test -f "dist/$PACKAGE/ffmpeg.exe"
+          test -f "dist/$PACKAGE/deno.exe"
+
+      - name: Create archive
+        run: |
+          PACKAGE="dlr-${{ matrix.name }}"
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            cd dist
+            zip -9 -r "$PACKAGE.zip" "$PACKAGE"
+          else
+            tar -C dist -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
+          fi
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum ./*.zip ./*.tar.gz > SHA256SUMS.txt
+
+      - name: Publish assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "DLR $GITHUB_REF_NAME"
+          fi
