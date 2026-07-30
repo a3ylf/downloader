@@ -360,6 +360,30 @@ $activityIcon = Find-Control 'ActivityIcon'
 $activityTitle = Find-Control 'ActivityTitle'
 $activityText = Find-Control 'ActivityText'
 $downloadProgress = Find-Control 'DownloadProgress'
+$sidebarLogo = Find-Control 'SidebarLogo'
+$heroLogo = Find-Control 'HeroLogo'
+
+$uiIconPath = Join-Path $PSScriptRoot 'ui_icon.png'
+if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot) -and (Test-Path -LiteralPath $uiIconPath -PathType Leaf)) {
+    $iconBytes = [IO.File]::ReadAllBytes($uiIconPath)
+}
+else {
+    $iconBytes = [Convert]::FromBase64String('__DLR_EMBEDDED_ICON__')
+}
+$iconStream = [IO.MemoryStream]::new($iconBytes)
+try {
+    $iconBitmap = [Windows.Media.Imaging.BitmapImage]::new()
+    $iconBitmap.BeginInit()
+    $iconBitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $iconBitmap.StreamSource = $iconStream
+    $iconBitmap.EndInit()
+    $iconBitmap.Freeze()
+    $sidebarLogo.Source = $iconBitmap
+    $heroLogo.Source = $iconBitmap
+}
+finally {
+    $iconStream.Dispose()
+}
 
 $appDirectory = $env:DLR_APP_DIR
 $appVersion = $env:DLR_APP_VERSION
