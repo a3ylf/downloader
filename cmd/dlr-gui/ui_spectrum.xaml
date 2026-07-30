@@ -50,12 +50,47 @@
       <Setter Property="Background" Value="#401A0D72"/><Setter Property="BorderBrush" Value="#59321B8E"/><Setter Property="Foreground" Value="#B986FF"/>
     </Style>
     <Style TargetType="ComboBoxItem">
-      <Setter Property="Foreground" Value="#F5F1FF"/><Setter Property="Background" Value="#0A0B20"/><Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Foreground" Value="#F5F1FF"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="11,8"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+        <Border x:Name="ItemShell" Background="{TemplateBinding Background}" CornerRadius="6" Margin="3,2">
+          <ContentPresenter Margin="{TemplateBinding Padding}"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemShell" Property="Background" Value="#4A29156D"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemShell" Property="Background" Value="#6B4B1CC8"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="GlassCombo" TargetType="ComboBox">
       <Setter Property="Foreground" Value="#F5F1FF"/><Setter Property="Background" Value="#0B0D25"/>
       <Setter Property="BorderBrush" Value="#552B2258"/><Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="Padding" Value="12,0"/><Setter Property="FontSize" Value="12"/>
+      <Setter Property="Padding" Value="12,0"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+        <Grid>
+          <Border x:Name="ComboShell" CornerRadius="8" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+            <Grid>
+              <ContentPresenter Margin="13,0,38,0" VerticalAlignment="Center" HorizontalAlignment="Left" Content="{TemplateBinding SelectionBoxItem}" TextElement.Foreground="#F5F1FF"/>
+              <Path Data="M0,0 L4.5,4.5 L9,0" Stroke="#D7CEE8" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
+            </Grid>
+          </Border>
+          <ToggleButton Focusable="False" Background="Transparent" BorderThickness="0" Opacity="0" ClickMode="Press"
+                        IsChecked="{Binding IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}"/>
+          <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                 IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
+            <Border MinWidth="{Binding ActualWidth,RelativeSource={RelativeSource TemplatedParent}}"
+                    Margin="0,5,0,0" Padding="3" CornerRadius="8" Background="#FE090A20"
+                    BorderBrush="#76512FA5" BorderThickness="1">
+              <Border.Effect><DropShadowEffect Color="#02030C" BlurRadius="24" ShadowDepth="5" Opacity=".85"/></Border.Effect>
+              <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
+            </Border>
+          </Popup>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboShell" Property="Background" Value="#151334"/><Setter TargetName="ComboShell" Property="BorderBrush" Value="#8C4EF4"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ComboShell" Property="Opacity" Value=".42"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="SlimProgress" TargetType="ProgressBar">
       <Setter Property="Height" Value="2"/><Setter Property="Background" Value="#22160B48"/>
@@ -81,11 +116,8 @@
             <Grid>
               <Grid.RowDefinitions><RowDefinition Height="150"/><RowDefinition Height="*"/><RowDefinition Height="70"/></Grid.RowDefinitions>
               <StackPanel HorizontalAlignment="Center" Margin="0,20,0,0">
-                <Border Width="54" Height="54" CornerRadius="13" Background="#32120942" BorderBrush="#8B4A22C4" BorderThickness="1">
-                  <Grid>
-                    <Path Data="M 14,28 L 14,36 M 22,20 L 22,36 M 30,25 L 30,36 M 38,16 L 38,36" Stroke="#B87AFF" StrokeThickness="2.3" StrokeStartLineCap="Round"/>
-                    <Path Data="M 11,40 Q 11,44 15,44 L 39,44 Q 43,44 43,40" Stroke="#8C4BE7" StrokeThickness="1.5"/>
-                  </Grid>
+                <Border Width="72" Height="72" CornerRadius="16" Background="#22120942" BorderBrush="#8B4A22C4" BorderThickness="1">
+                  <Image Name="SidebarLogo" Width="66" Height="66" Stretch="Uniform"/>
                 </Border>
                 <TextBlock Name="TitleText" Text="DLR" Margin="0,9,0,0" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                 <TextBlock Name="VersionText" Text="0.4.1" Margin="0,2,0,0" FontSize="8" Foreground="#716A83" HorizontalAlignment="Center"/>
@@ -165,15 +197,15 @@
 
             <Grid Grid.Column="2">
               <Grid.RowDefinitions><RowDefinition Height="285"/><RowDefinition Height="112"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-              <Viewbox Width="248" Height="248" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Viewbox Width="270" Height="270" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Canvas Width="220" Height="220">
                   <Ellipse Canvas.Left="3" Canvas.Top="3" Width="214" Height="214" Stroke="#3F2E176F" StrokeDashArray="2,5"/>
                   <Ellipse Canvas.Left="14" Canvas.Top="14" Width="192" Height="192" Stroke="#6B3B1CAF"/>
                   <Ellipse Canvas.Left="27" Canvas.Top="27" Width="166" Height="166" Stroke="#73441CC1"/>
                   <Ellipse Canvas.Left="43" Canvas.Top="43" Width="134" Height="134" Stroke="#805428D7"/>
-                  <Ellipse Canvas.Left="62" Canvas.Top="62" Width="96" Height="96" Fill="#15150842" Stroke="#9B6231EA"/>
+                  <Ellipse Canvas.Left="55" Canvas.Top="55" Width="110" Height="110" Fill="#15150842" Stroke="#9B6231EA"/>
                   <Ellipse Canvas.Left="108" Canvas.Top="18" Width="6" Height="6" Fill="#B97AFF"/><Ellipse Canvas.Left="30" Canvas.Top="55" Width="4" Height="4" Fill="#7139C8"/><Ellipse Canvas.Left="185" Canvas.Top="70" Width="5" Height="5" Fill="#A366F2"/>
-                  <Path Canvas.Left="67" Canvas.Top="67" Data="M18,48L18,66Q18,73 26,73L70,73Q78,73 78,66L78,58 M33,39L33,57 M48,23L48,57 M63,35L63,57" Stroke="#B47AFF" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  <Image Name="HeroLogo" Canvas.Left="56" Canvas.Top="56" Width="108" Height="108" Stretch="Uniform"/>
                 </Canvas>
               </Viewbox>
               <Border Name="ActivityCard" Grid.Row="1">

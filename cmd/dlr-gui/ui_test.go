@@ -14,6 +14,8 @@ func TestEmbeddedUIContainsCoreControls(t *testing.T) {
 		`Name="DownloadButton"`,
 		`Name="OpenFolderButton"`,
 		`Name="ActivityCard"`,
+		`Name="SidebarLogo"`,
+		`Name="HeroLogo"`,
 	} {
 		if !strings.Contains(uiXAML, control) {
 			t.Errorf("embedded UI does not contain %s", control)
@@ -30,6 +32,8 @@ func TestEmbeddedUIUsesSpectrumWaveVisuals(t *testing.T) {
 		`x:Key="WaveStroke"`,
 		`Style="{StaticResource ActiveNavButton}"`,
 		`Name="VersionText"`,
+		`x:Name="PART_Popup"`,
+		`TextElement.Foreground="#F5F1FF"`,
 	} {
 		if !strings.Contains(uiXAML, visual) {
 			t.Errorf("embedded UI does not contain %s", visual)
