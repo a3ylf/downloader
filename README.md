@@ -100,5 +100,5 @@ After changing the Windows icon, regenerate its embedded resource with
 `GOOS=windows GOARCH=amd64 go generate ./cmd/dlr-gui`.
 
 Pull requests and pushes are tested and cross-compiled by GitHub Actions.
-Pushing a tag such as `v0.4.1` creates a GitHub Release with platform archives
+Pushing a tag such as `v0.4.2` creates a GitHub Release with platform archives
 and `SHA256SUMS.txt`.

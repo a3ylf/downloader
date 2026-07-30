@@ -16,7 +16,7 @@ import (
 	"unsafe"
 )
 
-var version = "0.4.1-dev"
+var version = "0.4.2-dev"
 
 var (
 	user32         = syscall.NewLazyDLL("user32.dll")
