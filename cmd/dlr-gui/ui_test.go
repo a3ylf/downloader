@@ -33,3 +33,16 @@ func TestEmbeddedUIUsesGlassVisuals(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedUIRegistersStartMenuShortcut(t *testing.T) {
+	for _, integration := range []string{
+		`GetFolderPath('Programs')`,
+		`'DLR.lnk'`,
+		`$shortcut.TargetPath = $target`,
+		`$shortcut.IconLocation = "$target,0"`,
+	} {
+		if !strings.Contains(uiScript, integration) {
+			t.Errorf("embedded UI does not contain %s", integration)
+		}
+	}
+}

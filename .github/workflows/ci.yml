@@ -130,6 +130,30 @@ jobs:
           }
           $window.Close()
 
+      - name: Verify Windows search shortcut
+        shell: powershell
+        run: |
+          $testDirectory = Join-Path $env:RUNNER_TEMP "dlr-start-menu-test"
+          New-Item $testDirectory -ItemType Directory -Force | Out-Null
+          New-Item (Join-Path $testDirectory "dlr-gui.exe") -ItemType File -Force | Out-Null
+
+          $env:DLR_APP_DIR = $testDirectory
+          $env:DLR_START_MENU_DIR = $testDirectory
+          $env:DLR_UI_VALIDATE = "1"
+          & (Resolve-Path "cmd/dlr-gui/ui_windows.ps1")
+
+          $shortcutPath = Join-Path $testDirectory "DLR.lnk"
+          if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+            throw "DLR.lnk was not created."
+          }
+
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut($shortcutPath)
+          $expectedTarget = Join-Path $testDirectory "dlr-gui.exe"
+          if ($shortcut.TargetPath -ne $expectedTarget) {
+            throw "Shortcut target is '$($shortcut.TargetPath)', expected '$expectedTarget'."
+          }
+
       - name: Test and build Windows app
         run: |
           go test ./cmd/dlr-gui

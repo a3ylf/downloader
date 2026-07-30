@@ -411,7 +411,7 @@ $xaml = @'
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Border Width="54" Height="54" CornerRadius="27" Background="#12FFFFFF" BorderBrush="#4AFFFFFF" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
-                                    <TextBlock Name="ActivityIcon" Text="↓" FontSize="29" FontWeight="Light" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#ECF0FF"/>
+                                    <TextBlock Name="ActivityIcon" Text="&#x2193;" FontSize="29" FontWeight="Light" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#ECF0FF"/>
                                 </Border>
                                 <Grid Grid.Column="1" Margin="10,0,0,0">
                                     <Grid.RowDefinitions>
@@ -484,6 +484,43 @@ if ([string]::IsNullOrWhiteSpace($appVersion)) {
 
 $titleText.Text = "DLR Downloader $appVersion"
 $outputInput.Text = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
+
+function Install-StartMenuShortcut {
+    $programsDirectory = $env:DLR_START_MENU_DIR
+    if ([string]::IsNullOrWhiteSpace($programsDirectory)) {
+        $programsDirectory = [Environment]::GetFolderPath('Programs')
+    }
+    if ([string]::IsNullOrWhiteSpace($programsDirectory)) {
+        return
+    }
+
+    $target = Join-Path $appDirectory 'dlr-gui.exe'
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+        return
+    }
+
+    $shortcutPath = Join-Path $programsDirectory 'DLR.lnk'
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $target
+    $shortcut.WorkingDirectory = $appDirectory
+    $shortcut.Description = 'DLR video and audio downloader'
+    $shortcut.IconLocation = "$target,0"
+    $shortcut.WindowStyle = 1
+    $shortcut.Save()
+}
+
+try {
+    Install-StartMenuShortcut
+}
+catch {
+    # A locked-down Windows account may block Start menu changes. The app can
+    # still run portably, so shortcut creation must never prevent startup.
+}
+
+if ($env:DLR_UI_VALIDATE -eq '1') {
+    return
+}
 
 function New-Brush([string] $color) {
     return [Windows.Media.BrushConverter]::new().ConvertFromString($color)
@@ -668,7 +705,7 @@ $downloadTimer.Add_Tick({
     Set-Busy $false
     if ($exitCode -eq 0) {
         Set-Status 'Complete.' '#68D391'
-        $activityIcon.Text = '✓'
+        $activityIcon.Text = [char] 0x2713
         $activityTitle.Text = 'Download complete'
         $activityText.Text = "Your file was saved to $($outputInput.Text)."
     }
@@ -764,7 +801,7 @@ $downloadButton.Add_Click({
 
         Set-Busy $true
         Set-Status 'Downloading...' '#B7ADFF'
-        $activityIcon.Text = '↓'
+        $activityIcon.Text = [char] 0x2193
         $activityTitle.Text = 'Download in progress'
         $activityText.Text = 'DLR is fetching and preparing your file. Keep this window open.'
         $downloadTimer.Start()

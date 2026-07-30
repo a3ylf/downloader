@@ -19,6 +19,9 @@ including YouTube and X/Twitter. It is available as:
 
 Keep all files from the ZIP together. The portable bundle includes `dlr.exe`,
 `yt-dlp`, FFmpeg, and Deno, so no separate installation is required.
+On first launch, DLR adds a current-user shortcut named **DLR** to the Windows
+Start menu. It then appears in **All apps** and Windows search. To place it in
+the pinned area, right-click DLR in the Start menu and choose **Pin to Start**.
 
 The Windows app downloads one item at a time and never downloads an entire
 playlist. Private, sensitive, or login-gated posts are supported by the CLI
