@@ -26,7 +26,7 @@ func TestEmbeddedUIUsesGlassVisuals(t *testing.T) {
 		"LinearGradientBrush",
 		"BlurEffect",
 		"DropShadowEffect",
-		`CornerRadius="18"`,
+		`CornerRadius="15"`,
 	} {
 		if !strings.Contains(uiScript, visual) {
 			t.Errorf("embedded UI does not contain %s", visual)
@@ -40,6 +40,17 @@ func TestEmbeddedUIRegistersStartMenuShortcut(t *testing.T) {
 		`'DLR.lnk'`,
 		`$shortcut.TargetPath = $target`,
 		`$shortcut.IconLocation = "$target,0"`,
+	} {
+		if !strings.Contains(uiScript, integration) {
+			t.Errorf("embedded UI does not contain %s", integration)
+		}
+	}
+}
+
+func TestEmbeddedUIUsesExecutableIcon(t *testing.T) {
+	for _, integration := range []string{
+		`ExtractAssociatedIcon($target)`,
+		`$window.Icon = $source`,
 	} {
 		if !strings.Contains(uiScript, integration) {
 			t.Errorf("embedded UI does not contain %s", integration)

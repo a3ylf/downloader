@@ -2,6 +2,8 @@
 
 package main
 
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64 --out rsrc --manifest gui --file-description "DLR video and audio downloader" --product-name DLR --original-filename dlr-gui.exe --icon ../../assets/windows/dlr.ico
+
 import (
 	"bytes"
 	"fmt"
@@ -14,7 +16,7 @@ import (
 	"unsafe"
 )
 
-var version = "0.3.0-dev"
+var version = "0.4.1-dev"
 
 var (
 	user32         = syscall.NewLazyDLL("user32.dll")

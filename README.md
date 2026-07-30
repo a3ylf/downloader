@@ -96,6 +96,9 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dlr.exe ./cmd/dlr
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H windowsgui" -o dlr-gui.exe ./cmd/dlr-gui
 ```
 
+After changing the Windows icon, regenerate its embedded resource with
+`GOOS=windows GOARCH=amd64 go generate ./cmd/dlr-gui`.
+
 Pull requests and pushes are tested and cross-compiled by GitHub Actions.
-Pushing a tag such as `v0.3.0` creates a GitHub Release with platform archives
+Pushing a tag such as `v0.4.1` creates a GitHub Release with platform archives
 and `SHA256SUMS.txt`.
