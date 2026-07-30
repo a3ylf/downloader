@@ -85,3 +85,52 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: go build -trimpath -ldflags "-H windowsgui" ./cmd/dlr-gui
+
+  windows-ui:
+    name: Validate Windows UI
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check PowerShell syntax and WPF markup
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $scriptPath = Resolve-Path "cmd/dlr-gui/ui_windows.ps1"
+          [void] [System.Management.Automation.Language.Parser]::ParseFile(
+            $scriptPath,
+            [ref] $tokens,
+            [ref] $parseErrors
+          )
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | Format-List
+            exit 1
+          }
+
+          Add-Type -AssemblyName PresentationFramework
+          $source = Get-Content $scriptPath -Raw
+          $match = [regex]::Match(
+            $source,
+            "(?s)\`$xaml = @'\r?\n(.*?)\r?\n'@"
+          )
+          if (-not $match.Success) {
+            throw "Embedded XAML block was not found."
+          }
+          $window = [Windows.Markup.XamlReader]::Parse($match.Groups[1].Value)
+          if ($null -eq $window.FindName("DownloadButton")) {
+            throw "DownloadButton was not created."
+          }
+          $window.Close()
+
+      - name: Test and build Windows app
+        run: |
+          go test ./cmd/dlr-gui
+          go build -trimpath -ldflags "-H windowsgui" ./cmd/dlr-gui

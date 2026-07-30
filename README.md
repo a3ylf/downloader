@@ -12,7 +12,8 @@ including YouTube and X/Twitter. It is available as:
    page.
 2. Download `dlr-windows-amd64.zip` from the latest release.
 3. Extract the entire ZIP to a folder.
-4. Double-click `dlr-gui.exe`.
+4. Double-click `dlr-gui.exe`. The desktop app uses a glassmorphism interface
+   built with Windows' included WPF components.
 5. Paste a link, select MP4 or MP3 and the desired video quality, choose the
    output folder, and click **Download**.
 
@@ -93,5 +94,5 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H windowsgui" -o dlr
 ```
 
 Pull requests and pushes are tested and cross-compiled by GitHub Actions.
-Pushing a tag such as `v0.2.0` creates a GitHub Release with platform archives
+Pushing a tag such as `v0.3.0` creates a GitHub Release with platform archives
 and `SHA256SUMS.txt`.
