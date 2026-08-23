@@ -525,9 +525,26 @@ function Get-UsefulOutput([string] $text) {
     if ($lines.Count -eq 0) {
         return ''
     }
-    $message = ($lines | Select-Object -Last 2) -join "`n"
-    if ($message.Length -gt 260) {
-        return $message.Substring(0, 257) + '...'
+
+    if ($text -match 'HTTP Error 403:\s*Forbidden') {
+        if ($text -match 'warning: could not update yt-dlp') {
+            return 'DLR could not update yt-dlp, then YouTube refused the media request (HTTP 403). Check your connection or firewall and retry.'
+        }
+        return 'YouTube refused the media request (HTTP 403). DLR checked for a current yt-dlp before downloading. Retry once; if it still fails, the video may require sign-in or be restricted.'
+    }
+
+    $important = @($lines | Where-Object {
+        $_ -match '^(ERROR|WARNING):' -or
+        ($_ -match '^error:' -and $_ -notmatch 'yt-dlp failed: exit status')
+    })
+    if ($important.Count -gt 0) {
+        $message = ($important | Select-Object -Last 4) -join "`n"
+    }
+    else {
+        $message = ($lines | Where-Object { $_ -notmatch '^error: yt-dlp failed: exit status' } | Select-Object -Last 4) -join "`n"
+    }
+    if ($message.Length -gt 520) {
+        return $message.Substring(0, 517) + '...'
     }
     return $message
 }

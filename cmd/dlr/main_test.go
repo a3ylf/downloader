@@ -1,9 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseArgsAcceptsOptionsAfterURL(t *testing.T) {
@@ -78,5 +80,31 @@ func TestBuildYTDLPArgsForMP3(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("args %q do not contain %q", joined, expected)
 		}
+	}
+}
+
+func TestLocalToolCandidatesComeBeforePathLookup(t *testing.T) {
+	candidates := localToolCandidates("yt-dlp")
+	if len(candidates) == 0 {
+		t.Fatal("localToolCandidates returned no candidates")
+	}
+	if !strings.Contains(candidates[0], filepath.Join(".tools", "bin", "yt-dlp")) {
+		t.Fatalf("first candidate = %q, want repository-local tool", candidates[0])
+	}
+}
+
+func TestYTDLPUpdateCheckExpiresAfterOneDay(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	now := time.Date(2026, time.August, 23, 12, 0, 0, 0, time.UTC)
+
+	if !ytDLPUpdateDue(now) {
+		t.Fatal("update was not due with no previous check")
+	}
+	markYTDLPUpdateChecked(now)
+	if ytDLPUpdateDue(now.Add(23 * time.Hour)) {
+		t.Fatal("update was due less than one day after previous check")
+	}
+	if !ytDLPUpdateDue(now.Add(25 * time.Hour)) {
+		t.Fatal("update was not due more than one day after previous check")
 	}
 }
