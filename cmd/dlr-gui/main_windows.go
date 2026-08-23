@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -56,6 +57,7 @@ func runUI() error {
 	command.Env = append(os.Environ(),
 		"DLR_APP_DIR="+appDir,
 		"DLR_APP_VERSION="+version,
+		"DLR_APP_PID="+strconv.Itoa(os.Getpid()),
 	)
 
 	var output bytes.Buffer

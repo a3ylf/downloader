@@ -128,7 +128,7 @@
                 <Button Content="&#xE823;" Style="{StaticResource NavButton}"/>
                 <Button Content="&#xE713;" Style="{StaticResource NavButton}"/>
               </StackPanel>
-              <Button Grid.Row="2" Content="&#xE946;" Style="{StaticResource NavButton}" HorizontalAlignment="Center"/>
+              <Button Name="UpdateButton" Grid.Row="2" Content="&#xE946;" ToolTip="Check for updates" Style="{StaticResource NavButton}" HorizontalAlignment="Center"/>
             </Grid>
           </Border>
 
@@ -168,8 +168,8 @@
                 </Grid>
                 <Grid Grid.Row="4">
                   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                  <ComboBox Name="FormatCombo" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="Video (MP4)"/><ComboBoxItem Content="Audio (MP3)"/></ComboBox>
-                  <ComboBox Name="QualityCombo" Grid.Column="2" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="Best available"/><ComboBoxItem Content="1080p"/><ComboBoxItem Content="720p"/><ComboBoxItem Content="480p"/></ComboBox>
+                  <ComboBox Name="FormatCombo" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="Audio (MP3)"/><ComboBoxItem Content="Video (MP4)"/></ComboBox>
+                  <ComboBox Name="QualityCombo" Grid.Column="2" Style="{StaticResource GlassCombo}" SelectedIndex="0" IsEnabled="False" Opacity="0.48"><ComboBoxItem Content="Best available"/><ComboBoxItem Content="1080p"/><ComboBoxItem Content="720p"/><ComboBoxItem Content="480p"/></ComboBox>
                 </Grid>
                 <TextBlock Grid.Row="5" Text="Save to" FontSize="10" Foreground="#D2CBDE" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                 <Grid Grid.Row="6">
