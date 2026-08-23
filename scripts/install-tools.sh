@@ -10,7 +10,8 @@ mkdir -p "$BIN"
 
 echo "Installing yt-dlp..."
 python3 -m venv "$VENV"
-"$VENV/bin/python" -m pip install --upgrade pip yt-dlp
+"$VENV/bin/python" -m pip install --upgrade pip
+"$VENV/bin/python" -m pip install --upgrade --pre 'yt-dlp[default]'
 ln -sf "$VENV/bin/yt-dlp" "$BIN/yt-dlp"
 
 if command -v ffmpeg >/dev/null 2>&1; then
