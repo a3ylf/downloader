@@ -289,8 +289,8 @@ $xaml = @'
                                 <TextBlock Text="DOWNLOAD AS" FontSize="9" FontWeight="SemiBold" Foreground="#B3A6CE"/><TextBlock Grid.Column="2" Text="MAXIMUM QUALITY" FontSize="9" FontWeight="SemiBold" Foreground="#B3A6CE"/>
                             </Grid>
                             <Grid Grid.Row="4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <ComboBox Name="FormatCombo" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="VIDEO (MP4)"/><ComboBoxItem Content="AUDIO (MP3)"/></ComboBox>
-                                <ComboBox Name="QualityCombo" Grid.Column="2" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="BEST AVAILABLE"/><ComboBoxItem Content="1080P"/><ComboBoxItem Content="720P"/><ComboBoxItem Content="480P"/></ComboBox>
+                                <ComboBox Name="FormatCombo" Style="{StaticResource GlassCombo}" SelectedIndex="0"><ComboBoxItem Content="AUDIO (MP3)"/><ComboBoxItem Content="VIDEO (MP4)"/></ComboBox>
+                                <ComboBox Name="QualityCombo" Grid.Column="2" Style="{StaticResource GlassCombo}" SelectedIndex="0" IsEnabled="False" Opacity="0.48"><ComboBoxItem Content="BEST AVAILABLE"/><ComboBoxItem Content="1080P"/><ComboBoxItem Content="720P"/><ComboBoxItem Content="480P"/></ComboBox>
                             </Grid>
                             <TextBlock Grid.Row="6" Text="SAVE TO" FontSize="9" FontWeight="SemiBold" Foreground="#B3A6CE"/>
                             <Grid Grid.Row="7"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions>
@@ -374,6 +374,7 @@ $activityText = Find-Control 'ActivityText'
 $downloadProgress = Find-Control 'DownloadProgress'
 $sidebarLogo = Find-Control 'SidebarLogo'
 $heroLogo = Find-Control 'HeroLogo'
+$updateButton = Find-Control 'UpdateButton'
 
 $uiIconPath = Join-Path $PSScriptRoot 'ui_icon.png'
 if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot) -and (Test-Path -LiteralPath $uiIconPath -PathType Leaf)) {
@@ -400,11 +401,16 @@ finally {
 
 $appDirectory = $env:DLR_APP_DIR
 $appVersion = $env:DLR_APP_VERSION
+$appProcessId = 0
+[void] [int]::TryParse($env:DLR_APP_PID, [ref] $appProcessId)
 if ([string]::IsNullOrWhiteSpace($appDirectory)) {
     $appDirectory = [AppDomain]::CurrentDomain.BaseDirectory
 }
 if ([string]::IsNullOrWhiteSpace($appVersion)) {
     $appVersion = 'dev'
+}
+if ($appProcessId -le 0) {
+    $appProcessId = [Diagnostics.Process]::GetCurrentProcess().Id
 }
 
 $titleText.Text = 'DLR'
@@ -464,13 +470,14 @@ function Set-Busy([bool] $busy) {
     $outputInput.IsEnabled = -not $busy
     $browseButton.IsEnabled = -not $busy
     $downloadButton.IsEnabled = -not $busy
+    $updateButton.IsEnabled = -not $busy
 
     if ($busy) {
         $qualityCombo.IsEnabled = $false
         $downloadProgress.Visibility = [Windows.Visibility]::Visible
     }
     else {
-        $qualityCombo.IsEnabled = ($formatCombo.SelectedIndex -eq 0)
+        $qualityCombo.IsEnabled = ($formatCombo.SelectedIndex -eq 1)
         $downloadProgress.Visibility = [Windows.Visibility]::Collapsed
     }
 }
@@ -525,6 +532,243 @@ function Get-UsefulOutput([string] $text) {
     return $message
 }
 
+function ConvertTo-DLRVersion([string] $value) {
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $null
+    }
+    $normalized = $value.Trim().TrimStart('v').Split('-')[0]
+    try {
+        return [Version] $normalized
+    }
+    catch {
+        return $null
+    }
+}
+
+function Install-DLRUpdate($release) {
+    $packageName = 'dlr-windows-amd64.zip'
+    $packageAsset = @($release.assets) | Where-Object { $_.name -eq $packageName } | Select-Object -First 1
+    $checksumAsset = @($release.assets) | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
+    if ($null -eq $packageAsset -or $null -eq $checksumAsset) {
+        throw 'The latest release does not contain the Windows package and checksum file.'
+    }
+
+    $updateDirectory = Join-Path ([IO.Path]::GetTempPath()) ('dlr-update-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($updateDirectory) | Out-Null
+
+    $updaterPath = Join-Path $updateDirectory 'install-update.ps1'
+    $updaterScript = @'
+param(
+    [int] $RunningProcessId,
+    [string] $PackageUrl,
+    [string] $ChecksumUrl,
+    [string] $UpdateDirectory,
+    [string] $Destination,
+    [string] $Executable,
+    [string] $InstalledVersion
+)
+$ErrorActionPreference = 'Stop'
+try {
+    try {
+        [Diagnostics.Process]::GetProcessById($RunningProcessId).WaitForExit()
+    }
+    catch {
+    }
+    Start-Sleep -Milliseconds 350
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $packagePath = Join-Path $UpdateDirectory 'dlr-windows-amd64.zip'
+    $checksumPath = Join-Path $UpdateDirectory 'SHA256SUMS.txt'
+    $extractPath = Join-Path $UpdateDirectory 'package'
+    $client = [Net.WebClient]::new()
+    $client.Headers['User-Agent'] = 'DLR-Updater/' + $InstalledVersion
+    try {
+        $client.DownloadFile($PackageUrl, $packagePath)
+        $client.DownloadFile($ChecksumUrl, $checksumPath)
+    }
+    finally {
+        $client.Dispose()
+    }
+
+    $checksumText = [IO.File]::ReadAllText($checksumPath)
+    $match = [Regex]::Match($checksumText, '(?im)^([a-f0-9]{64})\s+\*?\.?/?dlr-windows-amd64\.zip\s*$')
+    if (-not $match.Success) {
+        throw 'The release checksum file does not list the Windows package.'
+    }
+    $expectedHash = $match.Groups[1].Value.ToUpperInvariant()
+    $actualHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw 'The downloaded update failed SHA-256 verification and was not installed.'
+    }
+
+    Expand-Archive -LiteralPath $packagePath -DestinationPath $extractPath -Force
+    $source = Join-Path $extractPath 'dlr-windows-amd64'
+    if (-not (Test-Path -LiteralPath (Join-Path $source $Executable) -PathType Leaf)) {
+        throw 'The downloaded update has an unexpected folder structure.'
+    }
+    Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $Destination -Recurse -Force
+    Start-Process -FilePath (Join-Path $Destination $Executable) -WorkingDirectory $Destination
+}
+catch {
+    Add-Type -AssemblyName PresentationFramework
+    [void] [Windows.MessageBox]::Show(
+        "DLR could not install the update.`n`n$($_.Exception.Message)",
+        'DLR update failed',
+        [Windows.MessageBoxButton]::OK,
+        [Windows.MessageBoxImage]::Error
+    )
+}
+'@
+    [IO.File]::WriteAllText($updaterPath, $updaterScript, [Text.UTF8Encoding]::new($false))
+
+    $updaterArguments = @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', $updaterPath,
+        '-RunningProcessId', $appProcessId.ToString(),
+        '-PackageUrl', ([string] $packageAsset.browser_download_url),
+        '-ChecksumUrl', ([string] $checksumAsset.browser_download_url),
+        '-UpdateDirectory', $updateDirectory,
+        '-Destination', $appDirectory,
+        '-Executable', 'dlr-gui.exe',
+        '-InstalledVersion', $appVersion
+    )
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'powershell.exe'
+    $startInfo.Arguments = ($updaterArguments | ForEach-Object { Quote-NativeArgument ([string] $_) }) -join ' '
+    $startInfo.WorkingDirectory = $appDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    if (-not [Diagnostics.Process]::Start($startInfo)) {
+        throw 'Windows could not start the update installer.'
+    }
+    $window.Close()
+}
+
+$script:updateClient = $null
+$script:updateCheckTask = $null
+$script:updateCheckManual = $false
+
+$updateTimer = [Windows.Threading.DispatcherTimer]::new()
+$updateTimer.Interval = [TimeSpan]::FromMilliseconds(250)
+$updateTimer.Add_Tick({
+    if ($null -eq $script:updateCheckTask -or -not $script:updateCheckTask.IsCompleted) {
+        return
+    }
+
+    $updateTimer.Stop()
+    $task = $script:updateCheckTask
+    $wasManual = $script:updateCheckManual
+    $script:updateCheckTask = $null
+    $script:updateCheckManual = $false
+    if ($null -ne $script:updateClient) {
+        $script:updateClient.Dispose()
+        $script:updateClient = $null
+    }
+
+    if ($task.IsCanceled -or $task.IsFaulted) {
+        if ($wasManual) {
+            Set-Status 'Offline.' '#FFB86B'
+            [void] [Windows.MessageBox]::Show(
+                $window,
+                'DLR could not check GitHub for updates. Check your internet connection and try again.',
+                'Update check failed',
+                [Windows.MessageBoxButton]::OK,
+                [Windows.MessageBoxImage]::Warning
+            )
+        }
+        return
+    }
+
+    try {
+        $release = $task.Result | ConvertFrom-Json
+        $currentVersion = ConvertTo-DLRVersion $appVersion
+        $latestVersion = ConvertTo-DLRVersion ([string] $release.tag_name)
+        if ($null -eq $currentVersion -or $null -eq $latestVersion) {
+            if ($wasManual) {
+                throw 'DLR could not compare the installed and latest version numbers.'
+            }
+            return
+        }
+        if ($latestVersion -le $currentVersion) {
+            if ($wasManual) {
+                Set-Status 'Ready.' '#51D68B'
+                [void] [Windows.MessageBox]::Show(
+                    $window,
+                    "DLR $appVersion is already the latest version.",
+                    'DLR is up to date',
+                    [Windows.MessageBoxButton]::OK,
+                    [Windows.MessageBoxImage]::Information
+                )
+            }
+            return
+        }
+
+        $answer = [Windows.MessageBox]::Show(
+            $window,
+            "DLR $($release.tag_name) is available. DLR will close, install the verified GitHub release, and restart automatically. Continue?",
+            'DLR update available',
+            [Windows.MessageBoxButton]::YesNo,
+            [Windows.MessageBoxImage]::Information
+        )
+        if ($answer -ne [Windows.MessageBoxResult]::Yes) {
+            Set-Status 'Ready.' '#51D68B'
+            return
+        }
+
+        Set-Status 'Updating...' '#B7ADFF'
+        $activityIcon.Text = [char] 0xE895
+        $activityTitle.Text = 'Installing update'
+        $activityText.Text = 'Downloading and verifying the latest GitHub release.'
+        Install-DLRUpdate $release
+    }
+    catch {
+        Set-Status 'Update failed.' '#FF7B91'
+        $activityIcon.Text = '!'
+        $activityTitle.Text = 'Could not install update'
+        $activityText.Text = $_.Exception.Message
+        [void] [Windows.MessageBox]::Show(
+            $window,
+            $_.Exception.Message,
+            'DLR update failed',
+            [Windows.MessageBoxButton]::OK,
+            [Windows.MessageBoxImage]::Error
+        )
+    }
+})
+
+function Start-DLRUpdateCheck([bool] $manual) {
+    if ($null -ne $script:updateCheckTask) {
+        if ($manual) {
+            $script:updateCheckManual = $true
+            Set-Status 'Checking...' '#B7ADFF'
+        }
+        return
+    }
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $script:updateCheckManual = $manual
+        $script:updateClient = [Net.WebClient]::new()
+        $script:updateClient.Headers['User-Agent'] = 'DLR-Updater/' + $appVersion
+        $releaseUri = [Uri] 'https://api.github.com/repos/a3ylf/downloader/releases/latest'
+        $script:updateCheckTask = $script:updateClient.DownloadStringTaskAsync($releaseUri)
+        if ($manual) {
+            Set-Status 'Checking...' '#B7ADFF'
+        }
+        $updateTimer.Start()
+    }
+    catch {
+        if ($null -ne $script:updateClient) {
+            $script:updateClient.Dispose()
+            $script:updateClient = $null
+        }
+        $script:updateCheckTask = $null
+        if ($manual) {
+            [void] [Windows.MessageBox]::Show($window, $_.Exception.Message, 'Update check failed')
+        }
+    }
+}
+
 $urlInput.Add_TextChanged({
     if ([string]::IsNullOrWhiteSpace($urlInput.Text)) {
         $urlPlaceholder.Visibility = [Windows.Visibility]::Visible
@@ -570,8 +814,12 @@ $closeButton.Add_Click({
 })
 
 $formatCombo.Add_SelectionChanged({
-    $qualityCombo.IsEnabled = ($formatCombo.SelectedIndex -eq 0)
+    $qualityCombo.IsEnabled = ($formatCombo.SelectedIndex -eq 1)
     $qualityCombo.Opacity = if ($qualityCombo.IsEnabled) { 1 } else { 0.48 }
+})
+
+$updateButton.Add_Click({
+    Start-DLRUpdateCheck $true
 })
 
 $browseButton.Add_Click({
@@ -695,7 +943,7 @@ $downloadButton.Add_Click({
         [IO.Directory]::CreateDirectory($outputFolder) | Out-Null
 
         $downloadArguments = @('--out', $outputFolder)
-        if ($formatCombo.SelectedIndex -eq 1) {
+        if ($formatCombo.SelectedIndex -eq 0) {
             $downloadArguments += '--mp3'
         }
         else {
@@ -747,6 +995,11 @@ $downloadButton.Add_Click({
 
 $window.Add_Closed({
     $downloadTimer.Stop()
+    $updateTimer.Stop()
+    if ($null -ne $script:updateClient) {
+        $script:updateClient.Dispose()
+        $script:updateClient = $null
+    }
     if ($null -ne $script:downloadProcess -and -not $script:downloadProcess.HasExited) {
         try {
             $script:downloadProcess.Kill()
@@ -758,6 +1011,7 @@ $window.Add_Closed({
 
 $window.Add_ContentRendered({
     $urlInput.Focus()
+    Start-DLRUpdateCheck $false
 })
 
 [void] $window.ShowDialog()

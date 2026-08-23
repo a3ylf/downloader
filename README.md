@@ -14,14 +14,18 @@ including YouTube and X/Twitter. It is available as:
 3. Extract the entire ZIP to a folder.
 4. Double-click `dlr-gui.exe`. The desktop app uses a glassmorphism interface
    built with Windows' included WPF components.
-5. Paste a link, select MP4 or MP3 and the desired video quality, choose the
-   output folder, and click **Download**.
+5. Paste a link, choose the output folder, and click **Download**. MP3 is the
+   default; select MP4 and a maximum quality when you want video instead.
 
 Keep all files from the ZIP together. The portable bundle includes `dlr.exe`,
 `yt-dlp`, FFmpeg, and Deno, so no separate installation is required.
 On first launch, DLR adds a current-user shortcut named **DLR** to the Windows
 Start menu. It then appears in **All apps** and Windows search. To place it in
 the pinned area, right-click DLR in the Start menu and choose **Pin to Start**.
+On startup, the app also checks this repository's latest GitHub Release. When
+an update is available, DLR offers to download it, verifies its published
+SHA-256 checksum, installs the complete portable bundle, and restarts itself.
+The info button at the bottom of the sidebar checks again manually.
 
 The Windows app downloads one item at a time and never downloads an entire
 playlist. Private, sensitive, or login-gated posts are supported by the CLI
