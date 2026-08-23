@@ -15,17 +15,23 @@ var version = "0.2.0-dev"
 
 const outputTemplate = "%(title).200B [%(id)s].%(ext)s"
 
+// historyOutputTemplate is consumed by the desktop UI after yt-dlp has finished
+// all post-processing. The JSON conversion flag keeps titles and URLs safely on
+// a single machine-readable line without changing the normal CLI output.
+const historyOutputTemplate = `after_move:DLR_HISTORY_JSON:%(.{id,title,webpage_url,thumbnail,filepath,duration_string,extractor_key})j`
+
 const ytDLPUpdateInterval = 24 * time.Hour
 
 type options struct {
-	mp3       bool
-	outputDir string
-	cookies   string
-	quality   int
-	version   bool
-	ffmpegDir string
-	jsRuntime string
-	urls      []string
+	mp3         bool
+	outputDir   string
+	cookies     string
+	quality     int
+	version     bool
+	historyJSON bool
+	ffmpegDir   string
+	jsRuntime   string
+	urls        []string
 }
 
 func main() {
@@ -98,6 +104,7 @@ func parseArgs(args []string) (options, error) {
 	fs.StringVar(&opts.cookies, "cookies", "", "cookies file for sites that require login")
 	fs.IntVar(&opts.quality, "quality", 0, "maximum video height (480, 720, 1080, 1440, or 2160)")
 	fs.BoolVar(&opts.version, "version", false, "print version")
+	fs.BoolVar(&opts.historyJSON, "history-json", false, "emit completed-download metadata for the desktop UI")
 	fs.Usage = usage(fs)
 
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
@@ -179,6 +186,9 @@ func buildYTDLPArgs(opts options) []string {
 		"--restrict-filenames",
 		"--windows-filenames",
 		"-o", outputPath,
+	}
+	if opts.historyJSON {
+		args = append(args, "--print", historyOutputTemplate)
 	}
 
 	if opts.jsRuntime != "" {

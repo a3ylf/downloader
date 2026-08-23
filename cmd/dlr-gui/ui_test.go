@@ -20,9 +20,30 @@ func TestEmbeddedUIContainsCoreControls(t *testing.T) {
 		`Name="SidebarLogo"`,
 		`Name="HeroLogo"`,
 		`Name="UpdateButton"`,
+		`Name="DownloadNavButton"`,
+		`Name="HistoryButton"`,
+		`Name="HistoryPage"`,
+		`Name="HistoryList"`,
+		`Name="ClearHistoryButton"`,
 	} {
 		if !strings.Contains(uiXAML, control) {
 			t.Errorf("embedded UI does not contain %s", control)
+		}
+	}
+}
+
+func TestEmbeddedUIStoresDownloadHistoryWithThumbnails(t *testing.T) {
+	for _, integration := range []string{
+		`DLR_HISTORY_JSON:`,
+		`history.json`,
+		`LocalApplicationData`,
+		`Save-History`,
+		`Add-HistoryRecord`,
+		`Cache-HistoryThumbnail`,
+		`$historyButton.Add_Click`,
+	} {
+		if !strings.Contains(uiScript, integration) {
+			t.Errorf("embedded download history does not contain %q", integration)
 		}
 	}
 }
