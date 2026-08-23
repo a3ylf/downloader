@@ -123,8 +123,8 @@
                 <TextBlock Name="VersionText" Text="0.4.1" Margin="0,2,0,0" FontSize="8" Foreground="#716A83" HorizontalAlignment="Center"/>
               </StackPanel>
               <StackPanel Grid.Row="1" HorizontalAlignment="Center">
-                <Button Content="&#xE896;" Style="{StaticResource ActiveNavButton}"/>
-                <Button Content="&#xE8B7;" Style="{StaticResource NavButton}"/>
+                <Button Name="DownloadNavButton" Content="&#xE896;" ToolTip="Downloader" Style="{StaticResource ActiveNavButton}"/>
+                <Button Name="HistoryButton" Content="&#xE81C;" ToolTip="Download history" Style="{StaticResource NavButton}"/>
                 <Button Content="&#xE823;" Style="{StaticResource NavButton}"/>
                 <Button Content="&#xE713;" Style="{StaticResource NavButton}"/>
               </StackPanel>
@@ -140,7 +140,7 @@
             </StackPanel>
           </Grid>
 
-          <Grid Grid.Column="1" Grid.Row="1" Margin="24,0,24,24">
+          <Grid Name="DownloadPage" Grid.Column="1" Grid.Row="1" Margin="24,0,24,24">
             <Grid.ColumnDefinitions><ColumnDefinition Width="1.62*"/><ColumnDefinition Width="22"/><ColumnDefinition Width=".92*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" CornerRadius="14" Background="#B0080A20" BorderBrush="#3420194B" BorderThickness="1" Padding="22">
               <Border.Effect><DropShadowEffect Color="#02030E" BlurRadius="22" ShadowDepth="7" Opacity=".45"/></Border.Effect>
@@ -221,6 +221,32 @@
               </Canvas>
             </Grid>
           </Grid>
+
+          <Border Name="HistoryPage" Grid.Column="1" Grid.Row="1" Margin="24,0,24,24" Visibility="Collapsed"
+                  CornerRadius="14" Background="#B0080A20" BorderBrush="#3420194B" BorderThickness="1" Padding="24,20">
+            <Border.Effect><DropShadowEffect Color="#02030E" BlurRadius="22" ShadowDepth="7" Opacity=".45"/></Border.Effect>
+            <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <Grid>
+                <StackPanel>
+                  <TextBlock Text="Download history" FontSize="20" FontWeight="SemiBold"/>
+                  <TextBlock Text="Your completed downloads stay here." Margin="0,4,0,0" FontSize="11" Foreground="#8F85A5"/>
+                </StackPanel>
+                <Button Name="ClearHistoryButton" Content="Clear history" Width="104" Height="34" HorizontalAlignment="Right"
+                        Style="{StaticResource GlassButton}" Foreground="#C79AFF"/>
+              </Grid>
+              <Grid Grid.Row="1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Name="HistoryList" Margin="0,8,6,0"/>
+                </ScrollViewer>
+                <StackPanel Name="EmptyHistoryPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <TextBlock Text="&#xE81C;" FontFamily="Segoe MDL2 Assets" FontSize="42" Foreground="#6E42B8" HorizontalAlignment="Center"/>
+                  <TextBlock Text="No downloads yet" Margin="0,16,0,0" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                  <TextBlock Text="Completed videos and audio will appear here." Margin="0,6,0,0" FontSize="11" Foreground="#8F85A5"/>
+                </StackPanel>
+              </Grid>
+            </Grid>
+          </Border>
         </Grid>
       </Grid>
     </Border>

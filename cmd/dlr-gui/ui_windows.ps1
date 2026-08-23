@@ -375,6 +375,13 @@ $downloadProgress = Find-Control 'DownloadProgress'
 $sidebarLogo = Find-Control 'SidebarLogo'
 $heroLogo = Find-Control 'HeroLogo'
 $updateButton = Find-Control 'UpdateButton'
+$downloadNavButton = Find-Control 'DownloadNavButton'
+$historyButton = Find-Control 'HistoryButton'
+$downloadPage = Find-Control 'DownloadPage'
+$historyPage = Find-Control 'HistoryPage'
+$historyList = Find-Control 'HistoryList'
+$emptyHistoryPanel = Find-Control 'EmptyHistoryPanel'
+$clearHistoryButton = Find-Control 'ClearHistoryButton'
 
 $uiIconPath = Join-Path $PSScriptRoot 'ui_icon.png'
 if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot) -and (Test-Path -LiteralPath $uiIconPath -PathType Leaf)) {
@@ -458,6 +465,322 @@ function New-Brush([string] $color) {
     return [Windows.Media.BrushConverter]::new().ConvertFromString($color)
 }
 
+$historyDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'DLR'
+$historyPath = Join-Path $historyDirectory 'history.json'
+$thumbnailDirectory = Join-Path $historyDirectory 'thumbnails'
+$script:history = @()
+
+function Load-History {
+    $script:history = @()
+    if (-not (Test-Path -LiteralPath $historyPath -PathType Leaf)) {
+        return
+    }
+
+    try {
+        $saved = Get-Content -LiteralPath $historyPath -Raw | ConvertFrom-Json
+        if ($null -ne $saved) {
+            $script:history = @($saved) | Select-Object -First 100
+        }
+    }
+    catch {
+        # A partial or manually edited history file should not prevent startup.
+        $script:history = @()
+    }
+}
+
+function Save-History {
+    [IO.Directory]::CreateDirectory($historyDirectory) | Out-Null
+    $temporaryPath = $historyPath + '.tmp'
+    $json = ConvertTo-Json -InputObject @($script:history) -Depth 4
+    [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporaryPath -Destination $historyPath -Force
+}
+
+function Cache-HistoryThumbnail([string] $thumbnailUrl) {
+    if ([string]::IsNullOrWhiteSpace($thumbnailUrl)) {
+        return ''
+    }
+
+    try {
+        $uri = [Uri] $thumbnailUrl
+        if (-not $uri.IsAbsoluteUri -or ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https')) {
+            return ''
+        }
+        [IO.Directory]::CreateDirectory($thumbnailDirectory) | Out-Null
+        $thumbnailPath = Join-Path $thumbnailDirectory (([Guid]::NewGuid().ToString('N')) + '.img')
+        $request = [Net.HttpWebRequest]::Create($uri)
+        $request.UserAgent = 'DLR/' + $appVersion
+        $request.Timeout = 5000
+        $request.ReadWriteTimeout = 5000
+        $response = $request.GetResponse()
+        $responseStream = $response.GetResponseStream()
+        $fileStream = [IO.File]::Create($thumbnailPath)
+        try {
+            $responseStream.CopyTo($fileStream)
+        }
+        finally {
+            $fileStream.Dispose()
+            $responseStream.Dispose()
+            $response.Dispose()
+        }
+        return $thumbnailPath
+    }
+    catch {
+        if (-not [string]::IsNullOrWhiteSpace($thumbnailPath) -and (Test-Path -LiteralPath $thumbnailPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $thumbnailPath -Force -ErrorAction SilentlyContinue
+        }
+        return ''
+    }
+}
+
+function New-HistoryBitmap([string] $source) {
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        return $null
+    }
+
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($source)
+        $bitmap = [Windows.Media.Imaging.BitmapImage]::new()
+        $bitmap.BeginInit()
+        $bitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bitmap.StreamSource = $stream
+        $bitmap.EndInit()
+        $bitmap.Freeze()
+        return $bitmap
+    }
+    catch {
+        return $null
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Add-HistoryRecord($metadata, [string] $sourceUrl, [string] $format) {
+    $title = $sourceUrl
+    $filePath = ''
+    $thumbnailUrl = ''
+    $duration = ''
+    $provider = ''
+
+    if ($null -ne $metadata) {
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.title)) { $title = [string] $metadata.title }
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.filepath)) { $filePath = [string] $metadata.filepath }
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.thumbnail)) { $thumbnailUrl = [string] $metadata.thumbnail }
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.duration_string)) { $duration = [string] $metadata.duration_string }
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.extractor_key)) { $provider = [string] $metadata.extractor_key }
+        if (-not [string]::IsNullOrWhiteSpace([string] $metadata.webpage_url)) { $sourceUrl = [string] $metadata.webpage_url }
+    }
+
+    $thumbnailPath = Cache-HistoryThumbnail $thumbnailUrl
+    $record = [PSCustomObject]@{
+        Title = $title
+        SourceUrl = $sourceUrl
+        FilePath = $filePath
+        ThumbnailUrl = $thumbnailUrl
+        ThumbnailPath = $thumbnailPath
+        Format = $format
+        Duration = $duration
+        Provider = $provider
+        DownloadedAt = [DateTime]::Now.ToString('o')
+    }
+
+    $removed = @($script:history | Select-Object -Skip 99)
+    foreach ($oldRecord in $removed) {
+        if (-not [string]::IsNullOrWhiteSpace([string] $oldRecord.ThumbnailPath) -and (Test-Path -LiteralPath $oldRecord.ThumbnailPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $oldRecord.ThumbnailPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $script:history = @($record) + @($script:history | Select-Object -First 99)
+    Save-History
+}
+
+function Get-DownloadMetadata([string] $text) {
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $null
+    }
+
+    $matches = [Regex]::Matches($text, '(?m)^DLR_HISTORY_JSON:(\{.*\})\s*$')
+    if ($matches.Count -eq 0) {
+        return $null
+    }
+    try {
+        return $matches[$matches.Count - 1].Groups[1].Value | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function New-HistoryButton([string] $label, [string] $target, [bool] $isSource) {
+    $button = [Windows.Controls.Button]::new()
+    $button.Content = $label
+    $button.Height = 32
+    $button.Margin = [Windows.Thickness]::new(0, 0, 0, 7)
+    $button.Style = $window.FindResource('GlassButton')
+    $button.Foreground = New-Brush '#C79AFF'
+    $button.Tag = [PSCustomObject]@{ Target = $target; IsSource = $isSource }
+    $button.IsEnabled = -not [string]::IsNullOrWhiteSpace($target)
+    $button.Add_Click({
+        $action = $this.Tag
+        $destination = [string] $action.Target
+        if ([string]::IsNullOrWhiteSpace($destination)) {
+            return
+        }
+        try {
+            if ([bool] $action.IsSource) {
+                [void] [Diagnostics.Process]::Start($destination)
+                return
+            }
+            if (Test-Path -LiteralPath $destination -PathType Leaf) {
+                [void] [Diagnostics.Process]::Start($destination)
+                return
+            }
+            [void] [Windows.MessageBox]::Show(
+                $window,
+                'This downloaded file has been moved or deleted.',
+                'File not found',
+                [Windows.MessageBoxButton]::OK,
+                [Windows.MessageBoxImage]::Information
+            )
+        }
+        catch {
+            [void] [Windows.MessageBox]::Show($window, $_.Exception.Message, 'Could not open item')
+        }
+    })
+    return $button
+}
+
+function Render-History {
+    $historyList.Children.Clear()
+    $emptyHistoryPanel.Visibility = if ($script:history.Count -eq 0) { [Windows.Visibility]::Visible } else { [Windows.Visibility]::Collapsed }
+    $clearHistoryButton.IsEnabled = ($script:history.Count -gt 0)
+
+    foreach ($record in $script:history) {
+        $card = [Windows.Controls.Border]::new()
+        $card.Height = 108
+        $card.Margin = [Windows.Thickness]::new(0, 0, 0, 10)
+        $card.Padding = [Windows.Thickness]::new(10)
+        $card.CornerRadius = [Windows.CornerRadius]::new(10)
+        $card.Background = New-Brush '#B00B0D25'
+        $card.BorderBrush = New-Brush '#4B2B2258'
+        $card.BorderThickness = [Windows.Thickness]::new(1)
+
+        $layout = [Windows.Controls.Grid]::new()
+        foreach ($width in @('140', '16', '*', '16', '104')) {
+            $column = [Windows.Controls.ColumnDefinition]::new()
+            $column.Width = [Windows.GridLengthConverter]::new().ConvertFromString($width)
+            $layout.ColumnDefinitions.Add($column)
+        }
+
+        $thumbnailShell = [Windows.Controls.Border]::new()
+        $thumbnailShell.Width = 140
+        $thumbnailShell.Height = 78
+        $thumbnailShell.CornerRadius = [Windows.CornerRadius]::new(7)
+        $thumbnailShell.Background = New-Brush '#15150842'
+        $thumbnailShell.BorderBrush = New-Brush '#56331B7E'
+        $thumbnailShell.BorderThickness = [Windows.Thickness]::new(1)
+        $thumbnailGrid = [Windows.Controls.Grid]::new()
+        $placeholder = [Windows.Controls.TextBlock]::new()
+        $placeholder.Text = [char] 0xE91B
+        $placeholder.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets')
+        $placeholder.FontSize = 24
+        $placeholder.Foreground = New-Brush '#7950B9'
+        $placeholder.HorizontalAlignment = [Windows.HorizontalAlignment]::Center
+        $placeholder.VerticalAlignment = [Windows.VerticalAlignment]::Center
+        $thumbnailGrid.Children.Add($placeholder) | Out-Null
+
+        $thumbnailSource = [string] $record.ThumbnailPath
+        $bitmap = $null
+        if (-not [string]::IsNullOrWhiteSpace($thumbnailSource) -and (Test-Path -LiteralPath $thumbnailSource -PathType Leaf)) {
+            $bitmap = New-HistoryBitmap $thumbnailSource
+        }
+        if ($null -ne $bitmap) {
+            $image = [Windows.Controls.Image]::new()
+            $image.Source = $bitmap
+            $image.Stretch = [Windows.Media.Stretch]::UniformToFill
+            $thumbnailGrid.Children.Add($image) | Out-Null
+        }
+        $thumbnailShell.Child = $thumbnailGrid
+        [Windows.Controls.Grid]::SetColumn($thumbnailShell, 0)
+        $layout.Children.Add($thumbnailShell) | Out-Null
+
+        $details = [Windows.Controls.StackPanel]::new()
+        $details.VerticalAlignment = [Windows.VerticalAlignment]::Center
+        $title = [Windows.Controls.TextBlock]::new()
+        $title.Text = [string] $record.Title
+        $title.FontSize = 13
+        $title.FontWeight = [Windows.FontWeights]::SemiBold
+        $title.Foreground = New-Brush '#F5F1FF'
+        $title.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+        $details.Children.Add($title) | Out-Null
+
+        $dateText = 'Downloaded'
+        try { $dateText = ([DateTime]::Parse([string] $record.DownloadedAt)).ToLocalTime().ToString('MMM d, yyyy  h:mm tt') } catch {}
+        $metaParts = @([string] $record.Format, [string] $record.Duration, [string] $record.Provider) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $meta = [Windows.Controls.TextBlock]::new()
+        $meta.Text = ($metaParts -join '  •  ') + '  •  ' + $dateText
+        $meta.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
+        $meta.FontSize = 10
+        $meta.Foreground = New-Brush '#A79CBF'
+        $meta.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+        $details.Children.Add($meta) | Out-Null
+
+        $pathText = [Windows.Controls.TextBlock]::new()
+        $pathText.Text = if ([string]::IsNullOrWhiteSpace([string] $record.FilePath)) { [string] $record.SourceUrl } else { [string] $record.FilePath }
+        $pathText.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
+        $pathText.FontSize = 10
+        $pathText.Foreground = New-Brush '#746B88'
+        $pathText.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+        $details.Children.Add($pathText) | Out-Null
+        [Windows.Controls.Grid]::SetColumn($details, 2)
+        $layout.Children.Add($details) | Out-Null
+
+        $actions = [Windows.Controls.StackPanel]::new()
+        $actions.VerticalAlignment = [Windows.VerticalAlignment]::Center
+        $actions.Children.Add((New-HistoryButton 'Open file' ([string] $record.FilePath) $false)) | Out-Null
+        $actions.Children.Add((New-HistoryButton 'View source' ([string] $record.SourceUrl) $true)) | Out-Null
+        [Windows.Controls.Grid]::SetColumn($actions, 4)
+        $layout.Children.Add($actions) | Out-Null
+
+        $card.Child = $layout
+        $historyList.Children.Add($card) | Out-Null
+    }
+}
+
+function Show-HistoryPage([bool] $showHistory) {
+    $downloadPage.Visibility = if ($showHistory) { [Windows.Visibility]::Collapsed } else { [Windows.Visibility]::Visible }
+    $historyPage.Visibility = if ($showHistory) { [Windows.Visibility]::Visible } else { [Windows.Visibility]::Collapsed }
+    $downloadStyle = if ($showHistory) { 'NavButton' } else { 'ActiveNavButton' }
+    $historyStyle = if ($showHistory) { 'ActiveNavButton' } else { 'NavButton' }
+    $downloadNavButton.Style = $window.FindResource($downloadStyle)
+    $historyButton.Style = $window.FindResource($historyStyle)
+    if ($showHistory) {
+        Render-History
+    }
+}
+
+Load-History
+
+if ($env:DLR_UI_VALIDATE -eq 'history') {
+    $script:history = @([PSCustomObject]@{
+        Title = 'History preview'
+        SourceUrl = 'https://example.com/video'
+        FilePath = ''
+        ThumbnailUrl = ''
+        ThumbnailPath = ''
+        Format = 'MP4 video'
+        Duration = '2:05'
+        Provider = 'Example'
+        DownloadedAt = [DateTime]::Now.ToString('o')
+    })
+    Render-History
+    return
+}
+
 function Set-Status([string] $text, [string] $color) {
     $statusText.Text = $text
     $statusDot.Fill = New-Brush $color
@@ -521,7 +844,7 @@ function Get-UsefulOutput([string] $text) {
     if ([string]::IsNullOrWhiteSpace($text)) {
         return ''
     }
-    $lines = @($text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $lines = @($text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^DLR_HISTORY_JSON:' })
     if ($lines.Count -eq 0) {
         return ''
     }
@@ -839,6 +1162,38 @@ $updateButton.Add_Click({
     Start-DLRUpdateCheck $true
 })
 
+$downloadNavButton.Add_Click({
+    Show-HistoryPage $false
+})
+
+$historyButton.Add_Click({
+    Show-HistoryPage $true
+})
+
+$clearHistoryButton.Add_Click({
+    if ($script:history.Count -eq 0) {
+        return
+    }
+    $answer = [Windows.MessageBox]::Show(
+        $window,
+        'Remove every item from download history? Downloaded files will not be deleted.',
+        'Clear download history',
+        [Windows.MessageBoxButton]::YesNo,
+        [Windows.MessageBoxImage]::Question
+    )
+    if ($answer -ne [Windows.MessageBoxResult]::Yes) {
+        return
+    }
+    foreach ($record in $script:history) {
+        if (-not [string]::IsNullOrWhiteSpace([string] $record.ThumbnailPath) -and (Test-Path -LiteralPath $record.ThumbnailPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $record.ThumbnailPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $script:history = @()
+    Save-History
+    Render-History
+})
+
 $browseButton.Add_Click({
     $dialog = [Windows.Forms.FolderBrowserDialog]::new()
     $dialog.Description = 'Choose where downloaded files will be saved'
@@ -873,6 +1228,8 @@ $openFolderButton.Add_Click({
 $script:downloadProcess = $null
 $script:stdoutTask = $null
 $script:stderrTask = $null
+$script:activeDownloadLink = ''
+$script:activeDownloadFormat = ''
 
 $downloadTimer = [Windows.Threading.DispatcherTimer]::new()
 $downloadTimer.Interval = [TimeSpan]::FromMilliseconds(350)
@@ -891,6 +1248,7 @@ $downloadTimer.Add_Tick({
     $standardOutput = $script:stdoutTask.Result
     $standardError = $script:stderrTask.Result
     $combinedOutput = ($standardOutput + "`n" + $standardError).Trim()
+    $downloadMetadata = Get-DownloadMetadata $combinedOutput
     $usefulOutput = Get-UsefulOutput $combinedOutput
 
     Set-Busy $false
@@ -899,6 +1257,16 @@ $downloadTimer.Add_Tick({
         $activityIcon.Text = [char] 0x2713
         $activityTitle.Text = 'Download complete'
         $activityText.Text = "Your file was saved to $($outputInput.Text)."
+        try {
+            Add-HistoryRecord $downloadMetadata $script:activeDownloadLink $script:activeDownloadFormat
+            if ($historyPage.Visibility -eq [Windows.Visibility]::Visible) {
+                Render-History
+            }
+        }
+        catch {
+            # History is a convenience; a storage or thumbnail error must not
+            # turn a successfully downloaded file into a failed download.
+        }
     }
     else {
         Set-Status 'Failed.' '#FF7B91'
@@ -959,7 +1327,7 @@ $downloadButton.Add_Click({
     try {
         [IO.Directory]::CreateDirectory($outputFolder) | Out-Null
 
-        $downloadArguments = @('--out', $outputFolder)
+        $downloadArguments = @('--out', $outputFolder, '--history-json')
         if ($formatCombo.SelectedIndex -eq 0) {
             $downloadArguments += '--mp3'
         }
@@ -971,6 +1339,9 @@ $downloadButton.Add_Click({
             }
         }
         $downloadArguments += $link
+
+        $script:activeDownloadLink = $link
+        $script:activeDownloadFormat = if ($formatCombo.SelectedIndex -eq 0) { 'MP3 audio' } else { 'MP4 video' }
 
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
         $startInfo.FileName = $backend

@@ -69,17 +69,42 @@ func TestVideoFormat(t *testing.T) {
 
 func TestBuildYTDLPArgsForMP3(t *testing.T) {
 	args := buildYTDLPArgs(options{
-		mp3:       true,
-		outputDir: "music",
-		ffmpegDir: "tools",
-		urls:      []string{"https://example.com/video"},
+		mp3:         true,
+		historyJSON: true,
+		outputDir:   "music",
+		ffmpegDir:   "tools",
+		urls:        []string{"https://example.com/video"},
 	})
 	joined := strings.Join(args, " ")
 
-	for _, expected := range []string{"--extract-audio", "--audio-format mp3", "--no-playlist"} {
+	for _, expected := range []string{"--extract-audio", "--audio-format mp3", "--no-playlist", "--print " + historyOutputTemplate} {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("args %q do not contain %q", joined, expected)
 		}
+	}
+}
+
+func TestHistoryOutputIsEmittedAfterPostProcessing(t *testing.T) {
+	for _, expected := range []string{
+		"after_move:DLR_HISTORY_JSON:",
+		"title",
+		"thumbnail",
+		"filepath",
+	} {
+		if !strings.Contains(historyOutputTemplate, expected) {
+			t.Errorf("history output template %q does not contain %q", historyOutputTemplate, expected)
+		}
+	}
+}
+
+func TestHistoryOutputIsOnlyEnabledForDesktopUI(t *testing.T) {
+	args := buildYTDLPArgs(options{
+		outputDir: "downloads",
+		ffmpegDir: "tools",
+		urls:      []string{"https://example.com/video"},
+	})
+	if strings.Contains(strings.Join(args, " "), "DLR_HISTORY_JSON:") {
+		t.Fatal("normal CLI download unexpectedly emits desktop history metadata")
 	}
 }
 
