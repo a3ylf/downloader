@@ -96,7 +96,7 @@ jobs:
           TOOLS_TMP="$(mktemp -d)"
 
           curl --fail --location --retry 3 \
-            https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe \
+            https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe \
             --output "dist/$PACKAGE/yt-dlp.exe"
 
           curl --fail --location --retry 3 \

@@ -64,3 +64,16 @@ func TestEmbeddedUIUsesExecutableIcon(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedUIExplainsDownloaderFailures(t *testing.T) {
+	for _, diagnostic := range []string{
+		`HTTP Error 403:\s*Forbidden`,
+		`warning: could not update yt-dlp`,
+		`DLR checked for a current yt-dlp`,
+		`$_ -notmatch 'yt-dlp failed: exit status'`,
+	} {
+		if !strings.Contains(uiScript, diagnostic) {
+			t.Errorf("embedded UI does not contain diagnostic %q", diagnostic)
+		}
+	}
+}

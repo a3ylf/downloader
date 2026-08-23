@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var version = "0.2.0-dev"
 
 const outputTemplate = "%(title).200B [%(id)s].%(ext)s"
+
+const ytDLPUpdateInterval = 24 * time.Hour
 
 type options struct {
 	mp3       bool
@@ -47,6 +50,7 @@ func run(args []string) error {
 	if err != nil {
 		return missingToolError("yt-dlp")
 	}
+	updateBundledYTDLP(ytDLP)
 
 	ffmpeg, err := findTool("ffmpeg")
 	if err != nil {
@@ -219,10 +223,6 @@ func videoFormat(maxHeight int) string {
 }
 
 func findTool(name string) (string, error) {
-	if found, err := exec.LookPath(name); err == nil {
-		return found, nil
-	}
-
 	candidates := localToolCandidates(name)
 	for _, candidate := range candidates {
 		if isExecutable(candidate) {
@@ -230,7 +230,66 @@ func findTool(name string) (string, error) {
 		}
 	}
 
+	if found, err := exec.LookPath(name); err == nil {
+		return found, nil
+	}
+
 	return "", exec.ErrNotFound
+}
+
+func updateBundledYTDLP(ytDLP string) {
+	if runtime.GOOS != "windows" || !isBundledYTDLP(ytDLP) || !ytDLPUpdateDue(time.Now()) {
+		return
+	}
+
+	fmt.Println("Checking for downloader updates...")
+	cmd := exec.Command(ytDLP, "--update-to", "nightly")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = os.Environ()
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not update yt-dlp; continuing with the installed version:", err)
+	}
+	markYTDLPUpdateChecked(time.Now())
+}
+
+func isBundledYTDLP(ytDLP string) bool {
+	executable, err := os.Executable()
+	if err != nil || !strings.EqualFold(filepath.Base(ytDLP), "yt-dlp.exe") {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(filepath.Dir(ytDLP)), filepath.Clean(filepath.Dir(executable)))
+}
+
+func ytDLPUpdateDue(now time.Time) bool {
+	stamp, err := ytDLPUpdateStamp()
+	if err != nil {
+		return true
+	}
+	info, err := os.Stat(stamp)
+	return err != nil || now.Sub(info.ModTime()) >= ytDLPUpdateInterval
+}
+
+func markYTDLPUpdateChecked(now time.Time) {
+	stamp, err := ytDLPUpdateStamp()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
+		return
+	}
+	if err := os.WriteFile(stamp, []byte(now.Format(time.RFC3339)), 0o644); err == nil {
+		_ = os.Chtimes(stamp, now, now)
+	}
+}
+
+func ytDLPUpdateStamp() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, "DLR", "yt-dlp-update-check"), nil
 }
 
 func localToolCandidates(name string) []string {
