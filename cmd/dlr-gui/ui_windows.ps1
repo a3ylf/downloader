@@ -5,6 +5,18 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 
+Add-Type @'
+using System.Runtime.InteropServices;
+
+public static class DlrTaskbarIdentity
+{
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
+}
+'@
+
+[void] [DlrTaskbarIdentity]::SetCurrentProcessExplicitAppUserModelID('DLR.Downloader')
+
 $xaml = @'
 <Window
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -378,6 +390,7 @@ try {
     $iconBitmap.StreamSource = $iconStream
     $iconBitmap.EndInit()
     $iconBitmap.Freeze()
+    $window.Icon = $iconBitmap
     $sidebarLogo.Source = $iconBitmap
     $heroLogo.Source = $iconBitmap
 }
@@ -433,39 +446,6 @@ catch {
 
 if ($env:DLR_UI_VALIDATE -eq '1') {
     return
-}
-
-function Set-WindowIcon {
-    $target = Join-Path $appDirectory 'dlr-gui.exe'
-    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
-        return
-    }
-
-    Add-Type -AssemblyName System.Drawing
-    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($target)
-    if ($null -eq $icon) {
-        return
-    }
-
-    try {
-        $source = [Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon(
-            $icon.Handle,
-            [Windows.Int32Rect]::Empty,
-            [Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions()
-        )
-        $source.Freeze()
-        $window.Icon = $source
-    }
-    finally {
-        $icon.Dispose()
-    }
-}
-
-try {
-    Set-WindowIcon
-}
-catch {
-    # The embedded executable icon is cosmetic and must never block startup.
 }
 
 function New-Brush([string] $color) {
