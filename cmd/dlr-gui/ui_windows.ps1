@@ -4,6 +4,7 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Net.Http
 
 Add-Type @'
 using System.Runtime.InteropServices;
@@ -984,9 +985,20 @@ catch {
     $window.Close()
 }
 
-$script:updateClient = $null
+$script:updateHttpClient = $null
 $script:updateCheckTask = $null
 $script:updateCheckManual = $false
+
+function Set-UpdateCheckVisual([bool] $checking) {
+    if ($checking) {
+        $updateButton.Content = [char] 0xE895
+        $updateButton.ToolTip = 'Checking for updates...'
+    }
+    else {
+        $updateButton.Content = [char] 0xE946
+        $updateButton.ToolTip = 'Check for updates'
+    }
+}
 
 $updateTimer = [Windows.Threading.DispatcherTimer]::new()
 $updateTimer.Interval = [TimeSpan]::FromMilliseconds(250)
@@ -1000,17 +1012,24 @@ $updateTimer.Add_Tick({
     $wasManual = $script:updateCheckManual
     $script:updateCheckTask = $null
     $script:updateCheckManual = $false
-    if ($null -ne $script:updateClient) {
-        $script:updateClient.Dispose()
-        $script:updateClient = $null
+    if ($null -ne $script:updateHttpClient) {
+        $script:updateHttpClient.Dispose()
+        $script:updateHttpClient = $null
+    }
+    if ($wasManual) {
+        Set-UpdateCheckVisual $false
     }
 
     if ($task.IsCanceled -or $task.IsFaulted) {
         if ($wasManual) {
             Set-Status 'Offline.' '#FFB86B'
+            $failure = 'The update request timed out.'
+            if ($task.IsFaulted -and $null -ne $task.Exception) {
+                $failure = $task.Exception.GetBaseException().Message
+            }
             [void] [Windows.MessageBox]::Show(
                 $window,
-                'DLR could not check GitHub for updates. Check your internet connection and try again.',
+                "DLR could not check GitHub for updates. Check your internet connection and try again.`n`n$failure",
                 'Update check failed',
                 [Windows.MessageBoxButton]::OK,
                 [Windows.MessageBoxImage]::Warning
@@ -1081,6 +1100,7 @@ function Start-DLRUpdateCheck([bool] $manual) {
         if ($manual) {
             $script:updateCheckManual = $true
             Set-Status 'Checking...' '#B7ADFF'
+            Set-UpdateCheckVisual $true
         }
         return
     }
@@ -1088,22 +1108,27 @@ function Start-DLRUpdateCheck([bool] $manual) {
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $script:updateCheckManual = $manual
-        $script:updateClient = [Net.WebClient]::new()
-        $script:updateClient.Headers['User-Agent'] = 'DLR-Updater/' + $appVersion
+        $script:updateHttpClient = [Net.Http.HttpClient]::new()
+        $script:updateHttpClient.Timeout = [TimeSpan]::FromSeconds(20)
+        $script:updateHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd('DLR-Updater/' + $appVersion)
+        $script:updateHttpClient.DefaultRequestHeaders.Accept.ParseAdd('application/vnd.github+json')
         $releaseUri = [Uri] 'https://api.github.com/repos/a3ylf/downloader/releases/latest'
-        $script:updateCheckTask = $script:updateClient.DownloadStringTaskAsync($releaseUri)
+        $script:updateCheckTask = $script:updateHttpClient.GetStringAsync($releaseUri)
         if ($manual) {
             Set-Status 'Checking...' '#B7ADFF'
+            Set-UpdateCheckVisual $true
         }
         $updateTimer.Start()
     }
     catch {
-        if ($null -ne $script:updateClient) {
-            $script:updateClient.Dispose()
-            $script:updateClient = $null
+        if ($null -ne $script:updateHttpClient) {
+            $script:updateHttpClient.Dispose()
+            $script:updateHttpClient = $null
         }
         $script:updateCheckTask = $null
         if ($manual) {
+            Set-UpdateCheckVisual $false
+            Set-Status 'Update failed.' '#FF7B91'
             [void] [Windows.MessageBox]::Show($window, $_.Exception.Message, 'Update check failed')
         }
     }
@@ -1384,9 +1409,9 @@ $downloadButton.Add_Click({
 $window.Add_Closed({
     $downloadTimer.Stop()
     $updateTimer.Stop()
-    if ($null -ne $script:updateClient) {
-        $script:updateClient.Dispose()
-        $script:updateClient = $null
+    if ($null -ne $script:updateHttpClient) {
+        $script:updateHttpClient.Dispose()
+        $script:updateHttpClient = $null
     }
     if ($null -ne $script:downloadProcess -and -not $script:downloadProcess.HasExited) {
         try {

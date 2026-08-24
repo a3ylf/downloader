@@ -145,6 +145,9 @@ func abs(value int) int {
 func TestEmbeddedUIInstallsVerifiedGitHubUpdates(t *testing.T) {
 	for _, integration := range []string{
 		`https://api.github.com/repos/a3ylf/downloader/releases/latest`,
+		`[Net.Http.HttpClient]::new()`,
+		`Timeout = [TimeSpan]::FromSeconds(20)`,
+		`Set-UpdateCheckVisual $true`,
 		`dlr-windows-amd64.zip`,
 		`SHA256SUMS.txt`,
 		`Get-FileHash -LiteralPath $packagePath -Algorithm SHA256`,
