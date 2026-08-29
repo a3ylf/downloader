@@ -40,6 +40,9 @@ func TestEmbeddedUIStoresDownloadHistoryWithThumbnails(t *testing.T) {
 		`Save-History`,
 		`Add-HistoryRecord`,
 		`Cache-HistoryThumbnail`,
+		`DLR_HISTORY_DIR`,
+		`history-save`,
+		`history-load`,
 		`$historyButton.Add_Click`,
 	} {
 		if !strings.Contains(uiScript, integration) {
