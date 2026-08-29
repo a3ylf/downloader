@@ -466,13 +466,18 @@ function New-Brush([string] $color) {
     return [Windows.Media.BrushConverter]::new().ConvertFromString($color)
 }
 
-$historyDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'DLR'
+$historyDirectory = $env:DLR_HISTORY_DIR
+if ([string]::IsNullOrWhiteSpace($historyDirectory)) {
+    $historyDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'DLR'
+}
 $historyPath = Join-Path $historyDirectory 'history.json'
 $thumbnailDirectory = Join-Path $historyDirectory 'thumbnails'
 $script:history = @()
+$script:historyDirty = $false
 
 function Load-History {
     $script:history = @()
+    $script:historyDirty = $false
     if (-not (Test-Path -LiteralPath $historyPath -PathType Leaf)) {
         return
     }
@@ -480,7 +485,9 @@ function Load-History {
     try {
         $saved = Get-Content -LiteralPath $historyPath -Raw | ConvertFrom-Json
         if ($null -ne $saved) {
-            $script:history = @($saved) | Select-Object -First 100
+            # Windows PowerShell unwraps a one-item pipeline into a scalar.
+            # Capture the pipeline again so history always remains an array.
+            $script:history = @(@($saved) | Select-Object -First 100)
         }
     }
     catch {
@@ -492,9 +499,11 @@ function Load-History {
 function Save-History {
     [IO.Directory]::CreateDirectory($historyDirectory) | Out-Null
     $temporaryPath = $historyPath + '.tmp'
-    $json = ConvertTo-Json -InputObject @($script:history) -Depth 4
+    $historyItems = @($script:history)
+    $json = ConvertTo-Json -InputObject $historyItems -Depth 4
     [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $temporaryPath -Destination $historyPath -Force
+    $script:historyDirty = $false
 }
 
 function Cache-HistoryThumbnail([string] $thumbnailUrl) {
@@ -596,6 +605,7 @@ function Add-HistoryRecord($metadata, [string] $sourceUrl, [string] $format) {
         }
     }
     $script:history = @($record) + @($script:history | Select-Object -First 99)
+    $script:historyDirty = $true
     Save-History
 }
 
@@ -766,19 +776,26 @@ function Show-HistoryPage([bool] $showHistory) {
 
 Load-History
 
-if ($env:DLR_UI_VALIDATE -eq 'history') {
-    $script:history = @([PSCustomObject]@{
-        Title = 'History preview'
-        SourceUrl = 'https://example.com/video'
-        FilePath = ''
-        ThumbnailUrl = ''
-        ThumbnailPath = ''
-        Format = 'MP4 video'
-        Duration = '2:05'
-        Provider = 'Example'
-        DownloadedAt = [DateTime]::Now.ToString('o')
-    })
+if ($env:DLR_UI_VALIDATE -eq 'history-save') {
+    $metadata = [PSCustomObject]@{
+        title = 'Persistent history test'
+        webpage_url = 'https://example.com/video'
+        filepath = 'C:\Downloads\video.mp4'
+        duration_string = '2:05'
+        extractor_key = 'Example'
+        thumbnail = ''
+    }
+    Add-HistoryRecord $metadata $metadata.webpage_url 'MP4 video'
+    Write-Output ('HISTORY_SAVED=' + $historyPath)
+    return
+}
+
+if ($env:DLR_UI_VALIDATE -eq 'history-load') {
+    if ($script:history.Count -ne 2 -or $script:history[0].Title -ne 'Persistent history test') {
+        throw 'Download history did not survive a new UI process.'
+    }
     Render-History
+    Write-Output ('HISTORY_LOADED=' + $script:history[0].Title)
     return
 }
 
@@ -1215,6 +1232,7 @@ $clearHistoryButton.Add_Click({
         }
     }
     $script:history = @()
+    $script:historyDirty = $true
     Save-History
     Render-History
 })
@@ -1289,8 +1307,7 @@ $downloadTimer.Add_Tick({
             }
         }
         catch {
-            # History is a convenience; a storage or thumbnail error must not
-            # turn a successfully downloaded file into a failed download.
+            $activityText.Text = "Download complete, but history could not be saved: $($_.Exception.Message)"
         }
     }
     else {
@@ -1409,6 +1426,15 @@ $downloadButton.Add_Click({
 $window.Add_Closed({
     $downloadTimer.Stop()
     $updateTimer.Stop()
+    if ($script:historyDirty) {
+        try {
+            Save-History
+        }
+        catch {
+            # The completed-download path already reports storage errors. Closing
+            # the window should still proceed if the fallback save cannot run.
+        }
+    }
     if ($null -ne $script:updateHttpClient) {
         $script:updateHttpClient.Dispose()
         $script:updateHttpClient = $null

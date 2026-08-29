@@ -148,6 +148,30 @@ jobs:
             throw "Shortcut target is '$($shortcut.TargetPath)', expected '$expectedTarget'."
           }
 
+      - name: Verify download history persists across app processes
+        shell: powershell
+        run: |
+          $testDirectory = Join-Path $env:RUNNER_TEMP "dlr-history-test"
+          New-Item $testDirectory -ItemType Directory -Force | Out-Null
+          $scriptPath = Resolve-Path "cmd/dlr-gui/ui_windows.ps1"
+
+          $env:DLR_HISTORY_DIR = $testDirectory
+          $env:DLR_UI_VALIDATE = "history-save"
+          & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $scriptPath
+          if ($LASTEXITCODE -ne 0) { throw "The first history-save process failed." }
+
+          $historyPath = Join-Path $testDirectory "history.json"
+          if (-not (Test-Path -LiteralPath $historyPath -PathType Leaf)) {
+            throw "The first UI process did not create history.json."
+          }
+
+          & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $scriptPath
+          if ($LASTEXITCODE -ne 0) { throw "The second history-save process failed." }
+
+          $env:DLR_UI_VALIDATE = "history-load"
+          & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $scriptPath
+          if ($LASTEXITCODE -ne 0) { throw "The history-load process failed." }
+
       - name: Test and build Windows app
         run: |
           go test ./cmd/dlr-gui
