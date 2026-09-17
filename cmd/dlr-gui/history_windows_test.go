@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestWindowsHistoryUnicodeAndSearch(t *testing.T) {
+func TestWindowsHistory(t *testing.T) {
 	// Exercise the actual launcher stdin transport and embedded WPF, including
 	// two save cycles so already saved titles cannot silently become corrupted.
 	self, err := os.Executable()
@@ -18,7 +18,7 @@ func TestWindowsHistoryUnicodeAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	for _, mode := range []string{"history-save", "history-save", "history-load", "history-search"} {
+	for _, mode := range []string{"history-save", "history-save", "history-load", "history-search", "history-navigation", "history-repair"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

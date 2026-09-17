@@ -498,6 +498,47 @@ function Load-History {
         # A partial or manually edited history file should not prevent startup.
         $script:history = @()
     }
+
+    try { Repair-HistoryTitles } catch {
+        # Keep readable history available even when its backup cannot be saved.
+    }
+}
+
+function Restore-HistoryTitle([string] $title) {
+    $legacy = [Text.Encoding]::GetEncoding(1252, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    # Older versions could repeat the wrong decoding on each save/reopen.
+    for ($pass = 0; $pass -lt 8; $pass++) {
+        if ($title -notmatch '[\u00C2\u00C3\u00E2\u00F0]') { break }
+        try {
+            $candidate = $utf8.GetString($legacy.GetBytes($title))
+        }
+        catch { break }
+        if ($candidate -ceq $title) { break }
+        $title = $candidate
+    }
+    return $title
+}
+
+function Repair-HistoryTitles {
+    $repairs = @(
+        foreach ($record in $script:history) {
+            $restored = Restore-HistoryTitle ([string] $record.Title)
+            if ($restored -cne [string] $record.Title) {
+                [PSCustomObject]@{ Record = $record; Title = $restored }
+            }
+        }
+    )
+    if ($repairs.Count -eq 0) { return }
+
+    # Preserve the exact original file before changing any persisted titles.
+    $backupPath = $historyPath + '.before-text-repair.bak'
+    if (-not (Test-Path -LiteralPath $backupPath)) {
+        Copy-Item -LiteralPath $historyPath -Destination $backupPath
+    }
+    foreach ($repair in $repairs) { $repair.Record.Title = $repair.Title }
+    $script:historyDirty = $true
+    Save-History
 }
 
 function Save-History {
@@ -558,6 +599,7 @@ function New-HistoryBitmap([string] $source) {
         $bitmap = [Windows.Media.Imaging.BitmapImage]::new()
         $bitmap.BeginInit()
         $bitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bitmap.DecodePixelWidth = 280
         $bitmap.StreamSource = $stream
         $bitmap.EndInit()
         $bitmap.Freeze()
@@ -669,9 +711,138 @@ function New-HistoryButton([string] $label, [string] $target, [bool] $isSource) 
     return $button
 }
 
+# Retain controls and decoded thumbnails across navigation and search changes.
+$script:historyCards = @{}
+$script:renderedHistory = $null
+$script:renderedHistoryQuery = $null
+$script:pendingHistoryRecords = [Collections.Queue]::new()
+$historyRenderTimer = [Windows.Threading.DispatcherTimer]::new([Windows.Threading.DispatcherPriority]::Background)
+$historyRenderTimer.Interval = [TimeSpan]::FromMilliseconds(1)
+
+function New-HistoryCard($record) {
+    $card = [Windows.Controls.Border]::new()
+    $card.Height = 108
+    $card.Margin = [Windows.Thickness]::new(0, 0, 0, 10)
+    $card.Padding = [Windows.Thickness]::new(10)
+    $card.CornerRadius = [Windows.CornerRadius]::new(10)
+    $card.Background = New-Brush '#B00B0D25'
+    $card.BorderBrush = New-Brush '#4B2B2258'
+    $card.BorderThickness = [Windows.Thickness]::new(1)
+
+    $layout = [Windows.Controls.Grid]::new()
+    foreach ($width in @('140', '16', '*', '16', '104')) {
+        $column = [Windows.Controls.ColumnDefinition]::new()
+        $column.Width = [Windows.GridLengthConverter]::new().ConvertFromString($width)
+        $layout.ColumnDefinitions.Add($column)
+    }
+
+    $thumbnailShell = [Windows.Controls.Border]::new()
+    $thumbnailShell.Width = 140
+    $thumbnailShell.Height = 78
+    $thumbnailShell.CornerRadius = [Windows.CornerRadius]::new(7)
+    $thumbnailShell.Background = New-Brush '#15150842'
+    $thumbnailShell.BorderBrush = New-Brush '#56331B7E'
+    $thumbnailShell.BorderThickness = [Windows.Thickness]::new(1)
+    $thumbnailGrid = [Windows.Controls.Grid]::new()
+    $placeholder = [Windows.Controls.TextBlock]::new()
+    $placeholder.Text = [char] 0xE91B
+    $placeholder.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets')
+    $placeholder.FontSize = 24
+    $placeholder.Foreground = New-Brush '#7950B9'
+    $placeholder.HorizontalAlignment = [Windows.HorizontalAlignment]::Center
+    $placeholder.VerticalAlignment = [Windows.VerticalAlignment]::Center
+    $thumbnailGrid.Children.Add($placeholder) | Out-Null
+
+    $thumbnailSource = [string] $record.ThumbnailPath
+    $bitmap = $null
+    if (-not [string]::IsNullOrWhiteSpace($thumbnailSource) -and (Test-Path -LiteralPath $thumbnailSource -PathType Leaf)) {
+        $bitmap = New-HistoryBitmap $thumbnailSource
+    }
+    if ($null -ne $bitmap) {
+        $image = [Windows.Controls.Image]::new()
+        $image.Source = $bitmap
+        $image.Stretch = [Windows.Media.Stretch]::UniformToFill
+        $thumbnailGrid.Children.Add($image) | Out-Null
+    }
+    $thumbnailShell.Child = $thumbnailGrid
+    [Windows.Controls.Grid]::SetColumn($thumbnailShell, 0)
+    $layout.Children.Add($thumbnailShell) | Out-Null
+
+    $details = [Windows.Controls.StackPanel]::new()
+    $details.VerticalAlignment = [Windows.VerticalAlignment]::Center
+    $title = [Windows.Controls.TextBlock]::new()
+    $title.Text = [string] $record.Title
+    $title.FontSize = 13
+    $title.FontWeight = [Windows.FontWeights]::SemiBold
+    $title.Foreground = New-Brush '#F5F1FF'
+    $title.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+    $details.Children.Add($title) | Out-Null
+
+    $dateText = 'Downloaded'
+    try { $dateText = ([DateTime]::Parse([string] $record.DownloadedAt)).ToLocalTime().ToString('MMM d, yyyy  h:mm tt') } catch {}
+    $metaParts = @([string] $record.Format, [string] $record.Duration, [string] $record.Provider) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $meta = [Windows.Controls.TextBlock]::new()
+    # The launcher sends this script through a legacy-code-page stdin pipe.
+    $separator = '  ' + [char] 0x2022 + '  '
+    $meta.Text = ($metaParts -join $separator) + $separator + $dateText
+    $meta.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
+    $meta.FontSize = 10
+    $meta.Foreground = New-Brush '#A79CBF'
+    $meta.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+    $details.Children.Add($meta) | Out-Null
+
+    $pathText = [Windows.Controls.TextBlock]::new()
+    $pathText.Text = if ([string]::IsNullOrWhiteSpace([string] $record.FilePath)) { [string] $record.SourceUrl } else { [string] $record.FilePath }
+    $pathText.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
+    $pathText.FontSize = 10
+    $pathText.Foreground = New-Brush '#746B88'
+    $pathText.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
+    $details.Children.Add($pathText) | Out-Null
+    [Windows.Controls.Grid]::SetColumn($details, 2)
+    $layout.Children.Add($details) | Out-Null
+
+    $actions = [Windows.Controls.StackPanel]::new()
+    $actions.VerticalAlignment = [Windows.VerticalAlignment]::Center
+    $actions.Children.Add((New-HistoryButton 'Open file' ([string] $record.FilePath) $false)) | Out-Null
+    $actions.Children.Add((New-HistoryButton 'View source' ([string] $record.SourceUrl) $true)) | Out-Null
+    [Windows.Controls.Grid]::SetColumn($actions, 4)
+    $layout.Children.Add($actions) | Out-Null
+
+    $card.Child = $layout
+    return $card
+}
+
+function Add-HistoryRenderBatch {
+    # Always return to WPF between small batches so input and paint can run.
+    $budget = [Diagnostics.Stopwatch]::StartNew()
+    while ($script:pendingHistoryRecords.Count -gt 0) {
+        $record = $script:pendingHistoryRecords.Dequeue()
+        if (-not $script:historyCards.ContainsKey($record)) {
+            $script:historyCards[$record] = New-HistoryCard $record
+        }
+        $historyList.Children.Add($script:historyCards[$record]) | Out-Null
+        if ($budget.ElapsedMilliseconds -ge 4) { break }
+    }
+    if ($script:pendingHistoryRecords.Count -eq 0) { $historyRenderTimer.Stop() }
+}
+
+$historyRenderTimer.Add_Tick({ Add-HistoryRenderBatch })
+
 function Render-History {
-    $historyList.Children.Clear()
     $query = $historySearchInput.Text.Trim()
+    if ([object]::ReferenceEquals($script:renderedHistory, $script:history) -and $script:renderedHistoryQuery -ceq $query) {
+        return
+    }
+
+    $historyRenderTimer.Stop()
+    $script:pendingHistoryRecords.Clear()
+    # A removed record must release its controls and bitmap too.
+    foreach ($record in @($script:historyCards.Keys)) {
+        if ($script:history -notcontains $record) { $script:historyCards.Remove($record) }
+    }
+    $script:renderedHistory = $script:history
+    $script:renderedHistoryQuery = $query
+    $historyList.Children.Clear()
     $visibleRecords = @($script:history | Where-Object {
         ([string] $_.Title).IndexOf($query, [StringComparison]::OrdinalIgnoreCase) -ge 0
     })
@@ -681,97 +852,9 @@ function Render-History {
     $clearHistoryButton.IsEnabled = ($script:history.Count -gt 0)
 
     foreach ($record in $visibleRecords) {
-        $card = [Windows.Controls.Border]::new()
-        $card.Height = 108
-        $card.Margin = [Windows.Thickness]::new(0, 0, 0, 10)
-        $card.Padding = [Windows.Thickness]::new(10)
-        $card.CornerRadius = [Windows.CornerRadius]::new(10)
-        $card.Background = New-Brush '#B00B0D25'
-        $card.BorderBrush = New-Brush '#4B2B2258'
-        $card.BorderThickness = [Windows.Thickness]::new(1)
-
-        $layout = [Windows.Controls.Grid]::new()
-        foreach ($width in @('140', '16', '*', '16', '104')) {
-            $column = [Windows.Controls.ColumnDefinition]::new()
-            $column.Width = [Windows.GridLengthConverter]::new().ConvertFromString($width)
-            $layout.ColumnDefinitions.Add($column)
-        }
-
-        $thumbnailShell = [Windows.Controls.Border]::new()
-        $thumbnailShell.Width = 140
-        $thumbnailShell.Height = 78
-        $thumbnailShell.CornerRadius = [Windows.CornerRadius]::new(7)
-        $thumbnailShell.Background = New-Brush '#15150842'
-        $thumbnailShell.BorderBrush = New-Brush '#56331B7E'
-        $thumbnailShell.BorderThickness = [Windows.Thickness]::new(1)
-        $thumbnailGrid = [Windows.Controls.Grid]::new()
-        $placeholder = [Windows.Controls.TextBlock]::new()
-        $placeholder.Text = [char] 0xE91B
-        $placeholder.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets')
-        $placeholder.FontSize = 24
-        $placeholder.Foreground = New-Brush '#7950B9'
-        $placeholder.HorizontalAlignment = [Windows.HorizontalAlignment]::Center
-        $placeholder.VerticalAlignment = [Windows.VerticalAlignment]::Center
-        $thumbnailGrid.Children.Add($placeholder) | Out-Null
-
-        $thumbnailSource = [string] $record.ThumbnailPath
-        $bitmap = $null
-        if (-not [string]::IsNullOrWhiteSpace($thumbnailSource) -and (Test-Path -LiteralPath $thumbnailSource -PathType Leaf)) {
-            $bitmap = New-HistoryBitmap $thumbnailSource
-        }
-        if ($null -ne $bitmap) {
-            $image = [Windows.Controls.Image]::new()
-            $image.Source = $bitmap
-            $image.Stretch = [Windows.Media.Stretch]::UniformToFill
-            $thumbnailGrid.Children.Add($image) | Out-Null
-        }
-        $thumbnailShell.Child = $thumbnailGrid
-        [Windows.Controls.Grid]::SetColumn($thumbnailShell, 0)
-        $layout.Children.Add($thumbnailShell) | Out-Null
-
-        $details = [Windows.Controls.StackPanel]::new()
-        $details.VerticalAlignment = [Windows.VerticalAlignment]::Center
-        $title = [Windows.Controls.TextBlock]::new()
-        $title.Text = [string] $record.Title
-        $title.FontSize = 13
-        $title.FontWeight = [Windows.FontWeights]::SemiBold
-        $title.Foreground = New-Brush '#F5F1FF'
-        $title.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
-        $details.Children.Add($title) | Out-Null
-
-        $dateText = 'Downloaded'
-        try { $dateText = ([DateTime]::Parse([string] $record.DownloadedAt)).ToLocalTime().ToString('MMM d, yyyy  h:mm tt') } catch {}
-        $metaParts = @([string] $record.Format, [string] $record.Duration, [string] $record.Provider) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        $meta = [Windows.Controls.TextBlock]::new()
-        # The launcher sends this script through a legacy-code-page stdin pipe.
-        $separator = '  ' + [char] 0x2022 + '  '
-        $meta.Text = ($metaParts -join $separator) + $separator + $dateText
-        $meta.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
-        $meta.FontSize = 10
-        $meta.Foreground = New-Brush '#A79CBF'
-        $meta.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
-        $details.Children.Add($meta) | Out-Null
-
-        $pathText = [Windows.Controls.TextBlock]::new()
-        $pathText.Text = if ([string]::IsNullOrWhiteSpace([string] $record.FilePath)) { [string] $record.SourceUrl } else { [string] $record.FilePath }
-        $pathText.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
-        $pathText.FontSize = 10
-        $pathText.Foreground = New-Brush '#746B88'
-        $pathText.TextTrimming = [Windows.TextTrimming]::CharacterEllipsis
-        $details.Children.Add($pathText) | Out-Null
-        [Windows.Controls.Grid]::SetColumn($details, 2)
-        $layout.Children.Add($details) | Out-Null
-
-        $actions = [Windows.Controls.StackPanel]::new()
-        $actions.VerticalAlignment = [Windows.VerticalAlignment]::Center
-        $actions.Children.Add((New-HistoryButton 'Open file' ([string] $record.FilePath) $false)) | Out-Null
-        $actions.Children.Add((New-HistoryButton 'View source' ([string] $record.SourceUrl) $true)) | Out-Null
-        [Windows.Controls.Grid]::SetColumn($actions, 4)
-        $layout.Children.Add($actions) | Out-Null
-
-        $card.Child = $layout
-        $historyList.Children.Add($card) | Out-Null
+        $script:pendingHistoryRecords.Enqueue($record)
     }
+    if ($script:pendingHistoryRecords.Count -gt 0) { $historyRenderTimer.Start() }
 }
 
 function Show-HistoryPage([bool] $showHistory) {
@@ -813,6 +896,10 @@ if ($env:DLR_UI_VALIDATE -eq 'history-save') {
     return
 }
 
+function Complete-HistoryRenderValidation {
+    while ($script:pendingHistoryRecords.Count -gt 0) { Add-HistoryRenderBatch }
+}
+
 if ($env:DLR_UI_VALIDATE -eq 'history-load') {
     if ($script:history.Count -ne 2) {
         throw 'Download history did not survive a new UI process.'
@@ -823,6 +910,7 @@ if ($env:DLR_UI_VALIDATE -eq 'history-load') {
         }
     }
     Render-History
+    Complete-HistoryRenderValidation
     $details = $historyList.Children[0].Child.Children[1]
     if (-not $details.Children[1].Text.Contains([string] [char] 0x2022)) {
         throw 'Download history metadata separator was corrupted.'
@@ -837,16 +925,20 @@ if ($env:DLR_UI_VALIDATE -eq 'history-search') {
         [PSCustomObject]@{ Title = 'Second video' }
     )
     $historySearchInput.Text = ' FIRST '
+    Complete-HistoryRenderValidation
     if ($historyList.Children.Count -ne 1 -or $historyList.Children[0].Child.Children[1].Children[0].Text -cne 'First video [live]') {
         throw 'History search did not match a title ignoring case and surrounding whitespace.'
     }
     $historySearchInput.Text = '[live]'
+    Complete-HistoryRenderValidation
     if ($historyList.Children.Count -ne 1) { throw 'History search did not treat brackets literally.' }
     $historySearchInput.Text = '*'
+    Complete-HistoryRenderValidation
     if ($historyList.Children.Count -ne 0 -or $emptyHistoryPanel.Visibility -ne [Windows.Visibility]::Visible -or $emptyHistoryTitle.Text -ne 'No matching downloads') {
         throw 'History search did not show its no-results state for a literal asterisk.'
     }
     $historySearchInput.Text = ''
+    Complete-HistoryRenderValidation
     if ($historyList.Children.Count -ne 2 -or $script:history.Count -ne 2 -or $historySearchPlaceholder.Visibility -ne [Windows.Visibility]::Visible) {
         throw 'Clearing history search did not restore all records.'
     }
@@ -856,6 +948,102 @@ if ($env:DLR_UI_VALIDATE -eq 'history-search') {
         throw 'Empty history did not retain its initial state.'
     }
     Write-Output 'HISTORY_SEARCH_OK'
+    return
+}
+
+if ($env:DLR_UI_VALIDATE -eq 'history-navigation') {
+    $script:history = @(1..100 | ForEach-Object { [PSCustomObject]@{ Title = "Video $_" } })
+    Show-HistoryPage $true
+    if ($historyPage.Visibility -ne [Windows.Visibility]::Visible -or $historyList.Children.Count -ne 0 -or $script:pendingHistoryRecords.Count -ne 100) {
+        throw 'History navigation constructed cards before returning control to WPF.'
+    }
+
+    # Input must run before background card construction, even on a cold open.
+    $frame = [Windows.Threading.DispatcherFrame]::new()
+    [void] $window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Input, [Action] {
+        $script:cardsBeforeInput = $historyList.Children.Count
+        $frame.Continue = $false
+    })
+    [Windows.Threading.Dispatcher]::PushFrame($frame)
+    if ($script:cardsBeforeInput -ne 0) { throw 'History rendering blocked pending input.' }
+
+    Add-HistoryRenderBatch
+    if ($historyList.Children.Count -eq 0) { throw 'History rendering did not make progress.' }
+    # Changing the query discards unfinished work from the previous query.
+    $historySearchInput.Text = 'Video 100'
+    Complete-HistoryRenderValidation
+    if ($historyList.Children.Count -ne 1 -or $historyList.Children[0].Child.Children[1].Children[0].Text -ne 'Video 100') {
+        throw 'History search rendered stale queued results.'
+    }
+    $cachedCard = $historyList.Children[0]
+    Show-HistoryPage $false
+    Show-HistoryPage $true
+    if ($historyRenderTimer.IsEnabled -or -not [object]::ReferenceEquals($cachedCard, $historyList.Children[0])) {
+        throw 'Returning to history rebuilt an unchanged list.'
+    }
+
+    $historySearchInput.Text = ''
+    Complete-HistoryRenderValidation
+    if ($historyList.Children.Count -ne 100 -or -not [object]::ReferenceEquals($cachedCard, $historyList.Children[99])) {
+        throw 'Clearing search did not reuse existing history cards in order.'
+    }
+    $script:history = @([PSCustomObject]@{ Title = 'Newest video' }) + $script:history[0..98]
+    Render-History
+    Complete-HistoryRenderValidation
+    if ($script:historyCards.Count -ne 100 -or $historyList.Children[0].Child.Children[1].Children[0].Text -ne 'Newest video') {
+        throw 'Updated history did not refresh cards or evict removed records.'
+    }
+    $script:history = @()
+    Render-History
+    if ($historyRenderTimer.IsEnabled -or $script:historyCards.Count -ne 0 -or $historyList.Children.Count -ne 0) {
+        throw 'Clearing history retained cached cards or queued rendering.'
+    }
+
+    # Large thumbnails should decode at display scale and release the file.
+    $thumbnailPath = Join-Path $historyDirectory 'large-thumbnail.png'
+    $source = [Windows.Media.Imaging.RenderTargetBitmap]::new(1400, 780, 96, 96, [Windows.Media.PixelFormats]::Pbgra32)
+    $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($source))
+    $stream = [IO.File]::Create($thumbnailPath)
+    try { $encoder.Save($stream) } finally { $stream.Dispose() }
+    $decoded = New-HistoryBitmap $thumbnailPath
+    if ($null -eq $decoded -or $decoded.PixelWidth -ne 280 -or -not $decoded.IsFrozen) {
+        throw 'History thumbnail was not decoded at display scale.'
+    }
+    Remove-Item -LiteralPath $thumbnailPath
+    Write-Output 'HISTORY_NAVIGATION_OK'
+    return
+}
+
+if ($env:DLR_UI_VALIDATE -eq 'history-repair') {
+    $originalTitle = 'MarceloEspectro ' + [char]::ConvertFromUtf32(0x1F3B5) + ' - N' + [char] 0x00F3 + 's'
+    $legacy = [Text.Encoding]::GetEncoding(1252)
+    $brokenTitle = $originalTitle
+    for ($pass = 0; $pass -lt 3; $pass++) {
+        $brokenTitle = $legacy.GetString([Text.Encoding]::UTF8.GetBytes($brokenTitle))
+    }
+    $script:history = @(
+        [PSCustomObject]@{ Title = $brokenTitle; FilePath = 'C:\Downloads\original.mp4'; SourceUrl = 'https://example.com/video' },
+        [PSCustomObject]@{ Title = $originalTitle },
+        [PSCustomObject]@{ Title = ('Jo' + [char] 0x00E3 + 'o') },
+        [PSCustomObject]@{ Title = ('Unknown ' + [char] 0xFFFD) }
+    )
+    Save-History
+    $originalFile = [IO.File]::ReadAllText($historyPath)
+    Load-History
+    if ($script:history[0].Title -cne $originalTitle -or $script:history[1].Title -cne $originalTitle -or $script:history[2].Title -cne ('Jo' + [char] 0x00E3 + 'o') -or $script:history[3].Title -cne ('Unknown ' + [char] 0xFFFD)) {
+        throw 'History repair failed to restore a title or changed intact/irrecoverable text.'
+    }
+    if ($script:history[0].FilePath -cne 'C:\Downloads\original.mp4' -or $script:history[0].SourceUrl -cne 'https://example.com/video') {
+        throw 'History title repair changed a file or source target.'
+    }
+    $backupPath = $historyPath + '.before-text-repair.bak'
+    if ([IO.File]::ReadAllText($backupPath) -cne $originalFile) { throw 'History repair did not preserve the original file.' }
+    Load-History
+    if ($script:history[0].Title -cne $originalTitle -or [IO.File]::ReadAllText($backupPath) -cne $originalFile) {
+        throw 'History repair was not persistent or overwrote the original backup.'
+    }
+    Write-Output 'HISTORY_REPAIR_OK'
     return
 }
 
@@ -1491,6 +1679,7 @@ $downloadButton.Add_Click({
 $window.Add_Closed({
     $downloadTimer.Stop()
     $updateTimer.Stop()
+    $historyRenderTimer.Stop()
     if ($script:historyDirty) {
         try {
             Save-History
