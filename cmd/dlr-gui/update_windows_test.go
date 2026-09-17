@@ -73,8 +73,10 @@ $release = [PSCustomObject]@{
         [PSCustomObject]@{ name = 'SHA256SUMS.txt'; browser_download_url = $env:DLR_UPDATE_TEST_URL + '/checksums' }
     )
 }
+
 $env:DLR_UPDATE_TEST_ROLE = 'restarted'
 Install-DLRUpdate $release
+
 `
 	root := t.TempDir()
 	destination := filepath.Join(root, "DLR portable with spaces")
