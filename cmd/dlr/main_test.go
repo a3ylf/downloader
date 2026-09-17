@@ -77,7 +77,7 @@ func TestBuildYTDLPArgsForMP3(t *testing.T) {
 	})
 	joined := strings.Join(args, " ")
 
-	for _, expected := range []string{"--extract-audio", "--audio-format mp3", "--no-playlist", "--print " + historyOutputTemplate} {
+	for _, expected := range []string{"--extract-audio", "--audio-format mp3", "--no-playlist", "--encoding utf-8", "--print " + historyOutputTemplate} {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("args %q do not contain %q", joined, expected)
 		}

@@ -263,9 +263,9 @@ $xaml = @'
                             <TextBlock Name="TitleText" Text="DLR DOWNLOADER" Margin="11,0,0,0" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
-                            <Button Name="MinimizeButton" Content="−" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
-                            <Button Name="MaximizeButton" Content="□" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
-                            <Button Name="CloseButton" Content="×" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
+                            <Button Name="MinimizeButton" Content="&#x2212;" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
+                            <Button Name="MaximizeButton" Content="&#x25A1;" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
+                            <Button Name="CloseButton" Content="&#xD7;" Style="{StaticResource WindowButton}" Foreground="#AC75FF"/>
                         </StackPanel>
                     </Grid>
 
@@ -381,7 +381,11 @@ $historyButton = Find-Control 'HistoryButton'
 $downloadPage = Find-Control 'DownloadPage'
 $historyPage = Find-Control 'HistoryPage'
 $historyList = Find-Control 'HistoryList'
+$historySearchInput = Find-Control 'HistorySearchInput'
+$historySearchPlaceholder = Find-Control 'HistorySearchPlaceholder'
 $emptyHistoryPanel = Find-Control 'EmptyHistoryPanel'
+$emptyHistoryTitle = Find-Control 'EmptyHistoryTitle'
+$emptyHistoryText = Find-Control 'EmptyHistoryText'
 $clearHistoryButton = Find-Control 'ClearHistoryButton'
 
 $uiIconPath = Join-Path $PSScriptRoot 'ui_icon.png'
@@ -483,7 +487,7 @@ function Load-History {
     }
 
     try {
-        $saved = Get-Content -LiteralPath $historyPath -Raw | ConvertFrom-Json
+        $saved = Get-Content -LiteralPath $historyPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -ne $saved) {
             # Windows PowerShell unwraps a one-item pipeline into a scalar.
             # Capture the pipeline again so history always remains an array.
@@ -667,10 +671,16 @@ function New-HistoryButton([string] $label, [string] $target, [bool] $isSource) 
 
 function Render-History {
     $historyList.Children.Clear()
-    $emptyHistoryPanel.Visibility = if ($script:history.Count -eq 0) { [Windows.Visibility]::Visible } else { [Windows.Visibility]::Collapsed }
+    $query = $historySearchInput.Text.Trim()
+    $visibleRecords = @($script:history | Where-Object {
+        ([string] $_.Title).IndexOf($query, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+    $emptyHistoryPanel.Visibility = if ($visibleRecords.Count -eq 0) { [Windows.Visibility]::Visible } else { [Windows.Visibility]::Collapsed }
+    $emptyHistoryTitle.Text = if ($script:history.Count -eq 0) { 'No downloads yet' } else { 'No matching downloads' }
+    $emptyHistoryText.Text = if ($script:history.Count -eq 0) { 'Completed videos and audio will appear here.' } else { 'Try another video name or clear your search.' }
     $clearHistoryButton.IsEnabled = ($script:history.Count -gt 0)
 
-    foreach ($record in $script:history) {
+    foreach ($record in $visibleRecords) {
         $card = [Windows.Controls.Border]::new()
         $card.Height = 108
         $card.Margin = [Windows.Thickness]::new(0, 0, 0, 10)
@@ -733,7 +743,9 @@ function Render-History {
         try { $dateText = ([DateTime]::Parse([string] $record.DownloadedAt)).ToLocalTime().ToString('MMM d, yyyy  h:mm tt') } catch {}
         $metaParts = @([string] $record.Format, [string] $record.Duration, [string] $record.Provider) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         $meta = [Windows.Controls.TextBlock]::new()
-        $meta.Text = ($metaParts -join '  •  ') + '  •  ' + $dateText
+        # The launcher sends this script through a legacy-code-page stdin pipe.
+        $separator = '  ' + [char] 0x2022 + '  '
+        $meta.Text = ($metaParts -join $separator) + $separator + $dateText
         $meta.Margin = [Windows.Thickness]::new(0, 7, 0, 0)
         $meta.FontSize = 10
         $meta.Foreground = New-Brush '#A79CBF'
@@ -776,11 +788,22 @@ function Show-HistoryPage([bool] $showHistory) {
 
 Load-History
 
+$historySearchInput.Add_TextChanged({
+    $historySearchPlaceholder.Visibility = if ($historySearchInput.Text.Length -eq 0) { [Windows.Visibility]::Visible } else { [Windows.Visibility]::Collapsed }
+    Render-History
+})
+
+if ($env:DLR_UI_VALIDATE -in @('history-save', 'history-load')) {
+    # Keep script source ASCII while exercising Unicode in the persisted JSON.
+    $testTitle = 'N' + [char] 0x00F3 + 's ' + [char] 0x2014 + ' a' + [char] 0x00E7 + [char] 0x00E3 + 'o ' + [char]::ConvertFromUtf32(0x1F3B5)
+    $testFilePath = 'C:\Downloads\' + $testTitle + '.mp4'
+}
+
 if ($env:DLR_UI_VALIDATE -eq 'history-save') {
     $metadata = [PSCustomObject]@{
-        title = 'Persistent history test'
+        title = $testTitle
         webpage_url = 'https://example.com/video'
-        filepath = 'C:\Downloads\video.mp4'
+        filepath = $testFilePath
         duration_string = '2:05'
         extractor_key = 'Example'
         thumbnail = ''
@@ -791,11 +814,48 @@ if ($env:DLR_UI_VALIDATE -eq 'history-save') {
 }
 
 if ($env:DLR_UI_VALIDATE -eq 'history-load') {
-    if ($script:history.Count -ne 2 -or $script:history[0].Title -ne 'Persistent history test') {
+    if ($script:history.Count -ne 2) {
         throw 'Download history did not survive a new UI process.'
     }
+    foreach ($record in $script:history) {
+        if ($record.Title -cne $testTitle -or $record.FilePath -cne $testFilePath) {
+            throw 'Download history corrupted Unicode text between UI processes.'
+        }
+    }
     Render-History
+    $details = $historyList.Children[0].Child.Children[1]
+    if (-not $details.Children[1].Text.Contains([string] [char] 0x2022)) {
+        throw 'Download history metadata separator was corrupted.'
+    }
     Write-Output ('HISTORY_LOADED=' + $script:history[0].Title)
+    return
+}
+
+if ($env:DLR_UI_VALIDATE -eq 'history-search') {
+    $script:history = @(
+        [PSCustomObject]@{ Title = 'First video [live]' },
+        [PSCustomObject]@{ Title = 'Second video' }
+    )
+    $historySearchInput.Text = ' FIRST '
+    if ($historyList.Children.Count -ne 1 -or $historyList.Children[0].Child.Children[1].Children[0].Text -cne 'First video [live]') {
+        throw 'History search did not match a title ignoring case and surrounding whitespace.'
+    }
+    $historySearchInput.Text = '[live]'
+    if ($historyList.Children.Count -ne 1) { throw 'History search did not treat brackets literally.' }
+    $historySearchInput.Text = '*'
+    if ($historyList.Children.Count -ne 0 -or $emptyHistoryPanel.Visibility -ne [Windows.Visibility]::Visible -or $emptyHistoryTitle.Text -ne 'No matching downloads') {
+        throw 'History search did not show its no-results state for a literal asterisk.'
+    }
+    $historySearchInput.Text = ''
+    if ($historyList.Children.Count -ne 2 -or $script:history.Count -ne 2 -or $historySearchPlaceholder.Visibility -ne [Windows.Visibility]::Visible) {
+        throw 'Clearing history search did not restore all records.'
+    }
+    $script:history = @()
+    Render-History
+    if ($emptyHistoryTitle.Text -ne 'No downloads yet' -or $clearHistoryButton.IsEnabled) {
+        throw 'Empty history did not retain its initial state.'
+    }
+    Write-Output 'HISTORY_SEARCH_OK'
     return
 }
 
@@ -1396,6 +1456,8 @@ $downloadButton.Add_Click({
         $startInfo.CreateNoWindow = $true
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
+        $startInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+        $startInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
 
         $script:downloadProcess = [Diagnostics.Process]::new()
         $script:downloadProcess.StartInfo = $startInfo
