@@ -29,6 +29,13 @@ an update is available, DLR offers to download it, verifies its published
 SHA-256 checksum, installs the complete portable bundle, and restarts itself.
 The info button at the bottom of the sidebar checks again manually.
 
+If an older Windows release closes during an update and never reopens, its
+updater may be stuck waiting for the app to exit. End the remaining
+`dlr-gui.exe` process in Task Manager, then download and extract the complete
+Windows ZIP from Releases to a new folder and launch it there. Versions 0.5.2
+and 0.5.3 contain this bug; a fix in a newer release does not repair the
+updater already running in an older copy.
+
 The Windows app downloads one item at a time and never downloads an entire
 playlist. Private, sensitive, or login-gated posts are supported by the CLI
 when a cookies file is supplied.

@@ -994,8 +994,11 @@ catch {
     $startInfo.FileName = 'powershell.exe'
     $startInfo.Arguments = ($updaterArguments | ForEach-Object { Quote-NativeArgument ([string] $_) }) -join ' '
     $startInfo.WorkingDirectory = $appDirectory
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
+    # Start independently of the UI's redirected standard handles. Inheriting
+    # those pipes keeps the Go launcher waiting for EOF while the installer
+    # waits for that same launcher to exit, so neither process can finish.
+    $startInfo.UseShellExecute = $true
+    $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
     if (-not [Diagnostics.Process]::Start($startInfo)) {
         throw 'Windows could not start the update installer.'
     }
