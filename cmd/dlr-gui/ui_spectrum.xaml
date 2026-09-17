@@ -226,7 +226,7 @@
                   CornerRadius="14" Background="#B0080A20" BorderBrush="#3420194B" BorderThickness="1" Padding="24,20">
             <Border.Effect><DropShadowEffect Color="#02030E" BlurRadius="22" ShadowDepth="7" Opacity=".45"/></Border.Effect>
             <Grid>
-              <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
               <Grid>
                 <StackPanel>
                   <TextBlock Text="Download history" FontSize="20" FontWeight="SemiBold"/>
@@ -235,14 +235,21 @@
                 <Button Name="ClearHistoryButton" Content="Clear history" Width="104" Height="34" HorizontalAlignment="Right"
                         Style="{StaticResource GlassButton}" Foreground="#C79AFF"/>
               </Grid>
-              <Grid Grid.Row="1">
+              <Border Grid.Row="1" Height="36" VerticalAlignment="Top" CornerRadius="7" Background="#60070616" BorderBrush="#46332262" BorderThickness="1">
+                <Grid>
+                  <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="#8F85A5"/>
+                  <TextBox Name="HistorySearchInput" Margin="36,0,12,0" VerticalContentAlignment="Center" Background="Transparent" BorderThickness="0" Foreground="#F5F1FF" CaretBrush="White" FontSize="12" AutomationProperties.Name="Search history by video name"/>
+                  <TextBlock Name="HistorySearchPlaceholder" Text="Search by video name" Margin="37,0,12,0" VerticalAlignment="Center" Foreground="#8F85A5" FontSize="12" IsHitTestVisible="False"/>
+                </Grid>
+              </Border>
+              <Grid Grid.Row="2">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                   <StackPanel Name="HistoryList" Margin="0,8,6,0"/>
                 </ScrollViewer>
                 <StackPanel Name="EmptyHistoryPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
                   <TextBlock Text="&#xE81C;" FontFamily="Segoe MDL2 Assets" FontSize="42" Foreground="#6E42B8" HorizontalAlignment="Center"/>
-                  <TextBlock Text="No downloads yet" Margin="0,16,0,0" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-                  <TextBlock Text="Completed videos and audio will appear here." Margin="0,6,0,0" FontSize="11" Foreground="#8F85A5"/>
+                  <TextBlock Name="EmptyHistoryTitle" Text="No downloads yet" Margin="0,16,0,0" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                  <TextBlock Name="EmptyHistoryText" Text="Completed videos and audio will appear here." Margin="0,6,0,0" FontSize="11" Foreground="#8F85A5"/>
                 </StackPanel>
               </Grid>
             </Grid>

@@ -22,6 +22,20 @@ import (
 // The test executable doubles as both the installed launcher and its update.
 // Running from the destination also exercises Windows' executable file lock.
 func TestMain(m *testing.M) {
+	if os.Getenv("DLR_UI_TEST_LAUNCHER") == "1" {
+		// Run validation as one stdin command so return exits the entire block
+		// and a failed assertion remains the final PowerShell exit status.
+		validation, _, ok := strings.Cut(uiScript, "function Set-Status")
+		if !ok {
+			os.Exit(1)
+		}
+		uiScript = "& {\n" + validation + "\n}\n\n"
+		if err := runUI(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	switch os.Getenv("DLR_UPDATE_TEST_ROLE") {
 	case "launcher":
 		script, err := os.ReadFile(os.Getenv("DLR_UPDATE_TEST_SCRIPT"))

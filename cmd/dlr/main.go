@@ -188,7 +188,7 @@ func buildYTDLPArgs(opts options) []string {
 		"-o", outputPath,
 	}
 	if opts.historyJSON {
-		args = append(args, "--print", historyOutputTemplate)
+		args = append(args, "--encoding", "utf-8", "--print", historyOutputTemplate)
 	}
 
 	if opts.jsRuntime != "" {

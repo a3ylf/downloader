@@ -24,10 +24,22 @@ func TestEmbeddedUIContainsCoreControls(t *testing.T) {
 		`Name="HistoryButton"`,
 		`Name="HistoryPage"`,
 		`Name="HistoryList"`,
+		`Name="HistorySearchInput"`,
+		`Name="HistorySearchPlaceholder"`,
 		`Name="ClearHistoryButton"`,
 	} {
 		if !strings.Contains(uiXAML, control) {
 			t.Errorf("embedded UI does not contain %s", control)
+		}
+	}
+}
+
+func TestEmbeddedScriptSurvivesLegacyPowerShellInputEncoding(t *testing.T) {
+	// Windows PowerShell decodes the launcher's stdin using the active code
+	// page. Unicode belongs in base64 assets, XML entities, or [char] literals.
+	for offset, char := range uiScript {
+		if char > 127 {
+			t.Fatalf("script contains non-ASCII character %q at byte %d", char, offset)
 		}
 	}
 }
